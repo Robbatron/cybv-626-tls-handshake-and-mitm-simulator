@@ -25,7 +25,7 @@ main {
 
 section {
     background: #fff;
-    padding: 20px;
+    padding: 0px 20px 20px 20px;
     border-radius: 5px;
     box-shadow: 0 2px 5px rgba(0,0,0,0.1);
 }
@@ -60,6 +60,29 @@ section {
 #explanation {
     margin-top: 20px; /* Add some margin above the explanation */
     margin-bottom: 20px; /* Add some margin below the explanation */
+    padding: 15px 20px; /* Adjusted padding */
+    background-color: #f9f9f9; /* Very light grey background */
+    /* border-top: 3px solid #5bc0de; */ /* Removed static border */
+    border-top-width: 3px;
+    border-top-style: solid;
+    border-top-color: #ccc; /* Default neutral border */
+}
+
+/* Dynamic border colors */
+#explanation.client-border { border-top-color: #5bc0de; }
+#explanation.server-border { border-top-color: #5cb85c; }
+#explanation.attacker-border { border-top-color: #d9534f; }
+#explanation.neutral-border { border-top-color: #ccc; } /* Explicit neutral */
+
+#explanation h3 {
+    margin-top: 0; /* Remove default heading margin */
+    margin-bottom: 15px; /* Add space below heading */
+    color: #337ab7; /* Match button color */
+    font-weight: 600; /* Slightly bolder */
+}
+
+#explanation h3 i {
+    margin-right: 8px; /* Space between icon and text */
 }
 
 #nodes {
@@ -240,14 +263,6 @@ button:disabled:hover {
 
 .hidden {
     display: none !important; /* Use !important cautiously */
-}
-
-footer {
-    text-align: center;
-    margin-top: 20px;
-    padding: 10px;
-    background: #ddd;
-    color: #333;
 }
 
 /* Basic Responsive adjustments */
