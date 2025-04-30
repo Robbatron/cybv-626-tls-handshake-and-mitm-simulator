@@ -161,6 +161,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
+    // Utility function to escape HTML special characters
+    function escapeHtml(unsafe) {
+        if (!unsafe) return ''; // Handle null or undefined input
+        return unsafe
+             .replace(/&/g, "&amp;")
+             .replace(/</g, "&lt;")
+             .replace(/>/g, "&gt;")
+             .replace(/"/g, "&quot;")
+             .replace(/'/g, "&#039;");
+     }
+
     // Event Listeners
     startButton.addEventListener('click', runSimulation);
     toggleAttackButton.addEventListener('click', toggleAttack);
@@ -194,6 +205,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Pause/Resume Listeners
     pauseButton.addEventListener('click', () => {
+        console.log("Pause button clicked."); // DIAGNOSTIC
         isPaused = true;
         pauseButton.classList.add('hidden');
         resumeButton.classList.remove('hidden');
@@ -202,6 +214,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     resumeButton.addEventListener('click', () => {
+        console.log("Resume button clicked."); // DIAGNOSTIC
         isPaused = false;
         resumeButton.classList.add('hidden');
         pauseButton.classList.remove('hidden');
@@ -209,8 +222,11 @@ document.addEventListener('DOMContentLoaded', () => {
         explanationText.textContent = "Simulation Resuming...";
         // Signal waiting code to continue
         if (resumeNotifier) {
+            console.log("Calling resumeNotifier()."); // DIAGNOSTIC
             resumeNotifier();
             resumeNotifier = null;
+        } else {
+            console.log("resumeNotifier was null."); // DIAGNOSTIC
         }
     });
 
@@ -256,13 +272,14 @@ document.addEventListener('DOMContentLoaded', () => {
         explanationText.textContent = "Starting TLS Handshake...";
 
         try {
+            const selectedTlsVersion = document.getElementById('tls-version-select').value;
             if (isAttackMode) {
                 console.log("Attempting to run simulateAttackHandshake...");
-                await simulateAttackHandshake();
+                await simulateAttackHandshake(selectedTlsVersion);
                 console.log("simulateAttackHandshake finished.");
             } else {
                 console.log("Attempting to run simulateSecureHandshake...");
-                await simulateSecureHandshake();
+                await simulateSecureHandshake(selectedTlsVersion);
                 console.log("simulateSecureHandshake finished.");
             }
             console.log("Simulation function finished, attempting to show quiz...");
@@ -340,333 +357,229 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Helper function to wait if paused
     async function waitForResume() {
-        // Check if stopped first
+        console.log("waitForResume called."); // DIAGNOSTIC
+        // Check if stopped first.
         if (simulationStopped) {
-            throw new Error('Simulation stopped by user');
+            console.log("waitForResume: simulation stopped, throwing error."); // DIAGNOSTIC
+            throw new Error('Simulation stopped by user'); // Exit the simulation loop cleanly.
         }
-        // Then check if paused
+        // Then check if paused.
         if (isPaused) {
+            console.log("waitForResume: Simulation is paused. Waiting for resume..."); // DIAGNOSTIC
+            // Wait for the resumeNotifier promise to be resolved by the Resume button click.
             await new Promise(resolve => {
                 resumeNotifier = resolve;
             });
+            console.log("waitForResume: Resumed."); // DIAGNOSTIC
         }
+        // Quiz-related UI updates potentially moved here or kept separate.
         quizFeedbackElement.className = '';
         quizRestartButton.classList.remove('hidden');
         // Replay button shown after successful run in runSimulation now
         // replayButton.classList.remove('hidden'); 
     }
 
-    async function simulateSecureHandshake() {
-        console.log("Simulating SECURE handshake...");
-        try {
-            // 1. ClientHello
-            await waitForResume();
-            updateExplanation("Step 1: Client sends ClientHello (supported cipher suites, TLS version).");
-            await addMessage('Client', 'Server', 'ClientHello');
-            await waitForResume();
-            await delay(stepDelay);
+    async function simulateSecureHandshake(tlsVersion) {
+        console.log(`Simulating secure handshake for ${tlsVersion}...`);
+        updateExplanation(`Starting ${tlsVersion} Secure Handshake...`);
+        await delay(stepDelay / 2);
 
-            // 2. ServerHello
-            await waitForResume();
-            updateExplanation("Step 2: Server responds with ServerHello (chosen cipher suite, session ID).");
-            await addMessage('Server', 'Client', 'ServerHello');
-            await waitForResume();
-            await delay(stepDelay);
+        // Version-specific handshake logic.
+        switch (tlsVersion) {
+            case 'tls1.3':
+                // TLS 1.3 handshake steps (condensed).
+                await addMessage(clientNode, serverNode, 'ClientHello', tlsVersion);
+                updateExplanation('TLS 1.3: Client sends Hello (key share, supported versions, ciphers, sig algs).');
+                console.log("Before await waitForResume (TLS 1.3 - 1)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
 
-            // 3. Certificate
-            await waitForResume();
-            updateExplanation("Step 3: Server sends its Certificate (containing its public key).");
-            await addMessage('Server', 'Client', 'Certificate');
-            await waitForResume();
-            await delay(stepDelay);
+                // Server processes ClientHello, selects params, generates keys, derives early secrets
+                await addMessage(serverNode, clientNode, 'ServerHello', tlsVersion);
+                updateExplanation('TLS 1.3: Server sends Hello (selected key share, cipher).');
+                console.log("Before await waitForResume (TLS 1.3 - 2)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, clientNode, 'EncryptedExtensions', tlsVersion);
+                updateExplanation('TLS 1.3: Server sends Encrypted Extensions (e.g., ALPN).');
+                console.log("Before await waitForResume (TLS 1.3 - 3)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Optional: Server requests client certificate here if needed (CertificateRequest)
+                await addMessage(serverNode, clientNode, 'Certificate (TLS 1.3)', tlsVersion);
+                updateExplanation('TLS 1.3: Server sends its Certificate.');
+                console.log("Before await waitForResume (TLS 1.3 - 4)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, clientNode, 'CertificateVerify (TLS 1.3)', tlsVersion);
+                updateExplanation('TLS 1.3: Server proves ownership of its private key.');
+                console.log("Before await waitForResume (TLS 1.3 - 5)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, clientNode, 'Finished (Encrypted, TLS 1.3)', tlsVersion);
+                updateExplanation('TLS 1.3: Server Finished (verifies handshake). Client derives master secret.');
+                console.log("Before await waitForResume (TLS 1.3 - 6)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
 
-            // 4. Server Key Exchange / ServerHelloDone (Simplified)
-            await waitForResume();
-            updateExplanation("Step 4: Server sends key exchange parameters and signals end of its hello phase.");
-            await addMessage('Server', 'Client', 'ServerKeyExchange / ServerHelloDone');
-            await waitForResume();
-            await delay(stepDelay);
+                // Client processes Server messages, authenticates server, derives keys
+                // Optional: Client sends Certificate and CertificateVerify if requested
+                await addMessage(clientNode, serverNode, 'Finished (Encrypted, TLS 1.3)', tlsVersion);
+                updateExplanation('TLS 1.3: Client Finished (verifies handshake). Server derives master secret. Handshake complete!');
+                console.log("Before await waitForResume (TLS 1.3 - 7)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
 
-            // 5. Client Key Exchange
-            await waitForResume();
-            updateExplanation("Step 5: Client verifies certificate, generates pre-master secret, encrypts it with Server's public key, and sends it.");
-            await addMessage('Client', 'Server', 'ClientKeyExchange');
-            await waitForResume();
-            await delay(stepDelay);
+                // Application Data uses application traffic secrets derived from master secret
+                await addMessage(clientNode, serverNode, 'Application Data (Encrypted, TLS 1.3)', tlsVersion);
+                updateExplanation('TLS 1.3: Secure Application Data flowing.');
+                console.log("Before await waitForResume (TLS 1.3 - 8)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, clientNode, 'Application Data (Encrypted, TLS 1.3)', tlsVersion);
+                updateExplanation('TLS 1.3: Secure Application Data flowing.');
+                console.log("Before await waitForResume (TLS 1.3 - 9)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                break;
 
-            // --> ADD Key Derivation Step <--
-            await waitForResume();
-            updateExplanation("Step 5.5: Client & Server derive Master Secret from Pre-Master Secret and Randoms, then derive Session Keys.");
-            await delay(stepDelay / 2); // Shorter pause
+            case 'tls1.2':
+            case 'tls1.1':
+            case 'tls1.0':
+                // TLS 1.0-1.2 handshake steps (example using ECDHE).
+                await addMessage(clientNode, serverNode, 'ClientHello', tlsVersion);
+                updateExplanation(`${tlsVersion}: Client sends Hello (versions, ciphers, extensions like SNI).`);
+                console.log(`Before await waitForResume (${tlsVersion} - 1)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
 
-            // Both derive session keys now (implicitly)
-            await waitForResume();
-            updateExplanation("Step 6: Both Client and Server derive symmetric session keys from the exchanged secrets.");
-            await waitForResume();
-            await delay(stepDelay);
+                await addMessage(serverNode, clientNode, 'ServerHello', tlsVersion);
+                updateExplanation(`${tlsVersion}: Server sends Hello (chosen version, cipher, session ID).`);
+                console.log(`Before await waitForResume (${tlsVersion} - 2)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
 
-            // 7. ChangeCipherSpec (Client)
-            await waitForResume();
-            updateExplanation("Step 7: Client signals it will now use the new session keys.");
-            await addMessage('Client', 'Server', 'ChangeCipherSpec');
-            await waitForResume();
-            await delay(stepDelay);
+                await addMessage(serverNode, clientNode, 'Certificate', tlsVersion);
+                updateExplanation(`${tlsVersion}: Server sends its Certificate chain.`);
+                console.log(`Before await waitForResume (${tlsVersion} - 3)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
 
-            // 8. Finished (Client)
-            await waitForResume();
-            updateExplanation("Step 8: Client sends encrypted Finished message to verify key exchange.");
-            await addMessage('Client', 'Server', 'Finished (Encrypted)');
-            await waitForResume();
-            await delay(stepDelay);
+                // ServerKeyExchange is needed for DHE/ECDHE cipher suites
+                await addMessage(serverNode, clientNode, 'ServerKeyExchange', tlsVersion);
+                updateExplanation(`${tlsVersion}: Server sends Key Exchange parameters (e.g., EC curve point) signed by its certificate key.`);
+                console.log(`Before await waitForResume (${tlsVersion} - 4)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Optional: CertificateRequest if server wants client auth
+                await addMessage(serverNode, clientNode, 'ServerHelloDone', tlsVersion);
+                updateExplanation(`${tlsVersion}: Server indicates end of its initial messages.`);
+                console.log(`Before await waitForResume (${tlsVersion} - 5)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
 
-            // 9. ChangeCipherSpec (Server)
-            await waitForResume();
-            updateExplanation("Step 9: Server signals it will now use the new session keys.");
-            await addMessage('Server', 'Client', 'ChangeCipherSpec');
-            await waitForResume();
-            await delay(stepDelay);
+                // Optional: Client sends Certificate if requested
+                await addMessage(clientNode, serverNode, 'ClientKeyExchange', tlsVersion);
+                updateExplanation(`${tlsVersion}: Client sends its Key Exchange parameters (e.g., its EC point). Both sides calculate pre-master secret.`);
+                console.log(`Before await waitForResume (${tlsVersion} - 6)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Both sides calculate master secret from pre-master secret and randoms
+                // Now Client sends encrypted messages
+                await addMessage(clientNode, serverNode, 'ChangeCipherSpec', tlsVersion);
+                updateExplanation(`${tlsVersion}: Client signals switch to encrypted communication using derived keys.`);
+                console.log(`Before await waitForResume (${tlsVersion} - 7)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
 
-            // 10. Finished (Server)
-            await waitForResume();
-            updateExplanation("Step 10: Server sends encrypted Finished message to verify key exchange.");
-            await addMessage('Server', 'Client', 'Finished (Encrypted)');
-            await waitForResume();
-            await delay(stepDelay);
+                await addMessage(clientNode, serverNode, 'Finished (Encrypted)', tlsVersion);
+                updateExplanation(`${tlsVersion}: Client sends encrypted Finished (hash of handshake) to verify key exchange.`);
+                console.log(`Before await waitForResume (${tlsVersion} - 8)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
 
-            // Handshake Complete
-            await waitForResume();
-            updateExplanation("Secure handshake complete! Encrypted application data can now be exchanged.");
-            await delay(stepDelay); // Pause briefly after handshake completes
+                // Server calculates master secret and processes client messages
+                await addMessage(serverNode, clientNode, 'ChangeCipherSpec', tlsVersion);
+                updateExplanation(`${tlsVersion}: Server signals switch to encrypted communication.`);
+                console.log(`Before await waitForResume (${tlsVersion} - 9)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
 
-            // Post-Handshake Data Exchange
-            await waitForResume();
-            updateExplanation("Step 11: Client sends encrypted application data.");
-            await addMessage('Client', 'Server', 'Application Data (Encrypted)');
-            await waitForResume();
-            await delay(stepDelay);
+                await addMessage(serverNode, clientNode, 'Finished (Encrypted)', tlsVersion);
+                updateExplanation(`${tlsVersion}: Server sends encrypted Finished. Handshake complete!`);
+                console.log(`Before await waitForResume (${tlsVersion} - 10)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
 
-            await waitForResume();
-            updateExplanation("Step 12: Server sends encrypted application data.");
-            await addMessage('Server', 'Client', 'Application Data (Encrypted)');
-            await waitForResume();
-            await delay(stepDelay);
+                await addMessage(clientNode, serverNode, 'Application Data (Encrypted)', tlsVersion);
+                updateExplanation(`${tlsVersion}: Secure Application Data flowing.`);
+                console.log(`Before await waitForResume (${tlsVersion} - 11)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, clientNode, 'Application Data (Encrypted)', tlsVersion);
+                updateExplanation(`${tlsVersion}: Secure Application Data flowing.`);
+                console.log(`Before await waitForResume (${tlsVersion} - 12)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                break;
 
-            await waitForResume();
-            updateExplanation("End of Secure Simulation.");
+            case 'ssl3.0':
+                // SSL 3.0 handshake steps (example using RSA).
+                // ** Note: SSL 3.0 is insecure **
+                await addMessage(clientNode, serverNode, 'ClientHello', tlsVersion);
+                updateExplanation(`SSL 3.0: Client sends Hello (max version SSL 3.0, ciphers like RSA_3DES or RSA_RC4).`);
+                console.log(`Before await waitForResume (SSL 3.0 - 1)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
 
-        } catch (error) {
-            console.error("Simulation error:", error);
-            explanationText.textContent = "An error occurred during the simulation.";
-            throw error; // Re-throw error to be caught by runSimulation
-        } finally {
-            // Remove button state logic from here
-            // simulationRunning = false; // Handled by runSimulation
-            // isPaused = false;
-            // startButton.disabled = false;
-            // toggleAttackButton.disabled = false;
-            // pauseButton.classList.add('hidden');
-            // resumeButton.classList.add('hidden');
-            // replayButton.disabled = false; 
-            // clearButton.disabled = false;
+                await addMessage(serverNode, clientNode, 'ServerHello', tlsVersion);
+                updateExplanation(`SSL 3.0: Server sends Hello (chosen version SSL 3.0, cipher like RSA_3DES).`);
+                console.log(`Before await waitForResume (SSL 3.0 - 2)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+
+                await addMessage(serverNode, clientNode, 'Certificate', tlsVersion);
+                updateExplanation(`SSL 3.0: Server sends its Certificate (RSA key).`);
+                console.log(`Before await waitForResume (SSL 3.0 - 3)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+
+                // ServerKeyExchange typically NOT used for RSA key exchange in SSL 3.0
+                await addMessage(serverNode, clientNode, 'ServerHelloDone', tlsVersion);
+                updateExplanation(`SSL 3.0: Server indicates end of its initial messages.`);
+                console.log(`Before await waitForResume (SSL 3.0 - 4)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+
+                await addMessage(clientNode, serverNode, 'ClientKeyExchange', tlsVersion);
+                updateExplanation(`SSL 3.0: Client generates pre-master secret, encrypts it with Server's RSA public key.`);
+                console.log(`Before await waitForResume (SSL 3.0 - 5)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Both sides calculate master secret
+                await addMessage(clientNode, serverNode, 'ChangeCipherSpec', tlsVersion);
+                updateExplanation(`SSL 3.0: Client signals switch to encrypted communication.`);
+                console.log(`Before await waitForResume (SSL 3.0 - 6)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+
+                await addMessage(clientNode, serverNode, 'Finished (Encrypted)', tlsVersion);
+                updateExplanation(`SSL 3.0: Client sends encrypted Finished (based on MD5 and SHA-1 hashes).`);
+                console.log(`Before await waitForResume (SSL 3.0 - 7)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+
+                await addMessage(serverNode, clientNode, 'ChangeCipherSpec', tlsVersion);
+                updateExplanation(`SSL 3.0: Server signals switch to encrypted communication.`);
+                console.log(`Before await waitForResume (SSL 3.0 - 8)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+
+                await addMessage(serverNode, clientNode, 'Finished (Encrypted)', tlsVersion);
+                updateExplanation(`SSL 3.0: Server sends encrypted Finished. Handshake complete! (But insecure!)`);
+                console.log(`Before await waitForResume (SSL 3.0 - 9)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+
+                await addMessage(clientNode, serverNode, 'Application Data (Encrypted)', tlsVersion);
+                updateExplanation(`SSL 3.0: Encrypted Application Data (potentially vulnerable - e.g., POODLE if CBC used).`);
+                console.log(`Before await waitForResume (SSL 3.0 - 10)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, clientNode, 'Application Data (Encrypted)', tlsVersion);
+                updateExplanation(`SSL 3.0: Encrypted Application Data.`);
+                console.log(`Before await waitForResume (SSL 3.0 - 11)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                break;
         }
-    }
-
-    async function simulateAttackHandshake() {
-        console.log("Simulating MitM ATTACK handshake...");
-        const attackerNode = document.getElementById('attacker');
-        if (attackerNode.classList.contains('hidden')) {
-            console.warn("Attack simulation started but attacker node is hidden.");
-            attackerNode.classList.remove('hidden');
-        }
-
-        try {
-            await waitForResume();
-            updateExplanation("Simulating MitM ATTACK... Attacker intercepts connection.");
-            await waitForResume();
-            await delay(stepDelay);
-
-            // 1. Client sends ClientHello, intercepted by Attacker
-            await waitForResume();
-            updateExplanation("Step 1 (Attack): Client sends ClientHello, but it's intercepted by the Attacker.");
-            await addMessage('Client', 'Attacker', 'ClientHello (Intercepted)');
-            await waitForResume();
-            await delay(stepDelay);
-
-            // 2. Attacker initiates its own handshake with Server
-            await waitForResume();
-            updateExplanation("Step 2 (Attack): Attacker forwards ClientHello (or a modified version) to the Server.");
-            await addMessage('Attacker', 'Server', 'ClientHello');
-            await waitForResume();
-            await delay(stepDelay);
-
-            // 3. Server responds to Attacker
-            await waitForResume();
-            updateExplanation("Step 3 (Attack): Server responds to Attacker with ServerHello.");
-            await addMessage('Server', 'Attacker', 'ServerHello');
-            await waitForResume();
-            await delay(stepDelay);
-            await waitForResume();
-            updateExplanation("Step 4 (Attack): Server sends its REAL Certificate to the Attacker.");
-            await addMessage('Server', 'Attacker', 'Certificate (Server\'s REAL Cert)');
-            await waitForResume();
-            await delay(stepDelay);
-            await waitForResume();
-            updateExplanation("Step 5 (Attack): Server sends key exchange details to the Attacker.");
-            await addMessage('Server', 'Attacker', 'ServerKeyExchange / ServerHelloDone');
-            await waitForResume();
-            await delay(stepDelay);
-
-            // 4. Attacker responds to Client, posing as Server
-            await waitForResume();
-            updateExplanation("Step 6 (Attack): Attacker sends ServerHello back to the Client (posing as Server).");
-            await addMessage('Attacker', 'Client', 'ServerHello');
-            await waitForResume();
-            await delay(stepDelay);
-            await waitForResume();
-            updateExplanation("Step 7 (Attack): Attacker sends a FAKE Certificate to the Client! Client might warn or proceed.");
-            await addMessage('Attacker', 'Client', 'Certificate (Attacker\'s FAKE Cert)');
-            await waitForResume();
-            await delay(stepDelay);
-            await waitForResume();
-            updateExplanation("Step 8 (Attack): Attacker sends key exchange details to the Client.");
-            await addMessage('Attacker', 'Client', 'ServerKeyExchange / ServerHelloDone');
-            await waitForResume();
-            await delay(stepDelay);
-
-            // 5. Client sends encrypted data to Attacker (thinking it's Server)
-            await waitForResume();
-            updateExplanation("Step 9 (Attack): Client (thinking it talks to Server) sends encrypted pre-master secret using Attacker\'s FAKE public key.");
-            await addMessage('Client', 'Attacker', 'ClientKeyExchange (Encrypted with FAKE key)');
-            await waitForResume();
-            await delay(stepDelay);
-            await waitForResume();
-            updateExplanation("Step 10 (Attack): Attacker DECRYPTS the Client's message using its private key.");
-            // No visual message for decryption, just text explanation
-            await waitForResume();
-            await delay(stepDelay);
-            await waitForResume();
-            updateExplanation("Step 11 (Attack): Client sends ChangeCipherSpec & Finished to Attacker.");
-            await addMessage('Client', 'Attacker', 'ChangeCipherSpec');
-            await waitForResume(); // Added wait before second message
-            await addMessage('Client', 'Attacker', 'Finished (Encrypted)');
-            await waitForResume();
-            await delay(stepDelay);
-
-            // --> ADD Key Derivation Step (Client <-> Attacker) <--
-            await waitForResume();
-            updateExplanation("Step 11.5 (Attack): Client & Attacker (posing as Server) derive Session Keys for Client<->Attacker leg.");
-            await delay(stepDelay / 2); // Shorter pause
-
-            // 6. Attacker completes handshake with Server (thinking it's Client)
-            await waitForResume();
-            updateExplanation("Step 12 (Attack): Attacker sends ClientKeyExchange to Server (encrypted with Server\'s REAL public key).");
-            await addMessage('Attacker', 'Server', 'ClientKeyExchange (Encrypted with REAL key)');
-            await waitForResume();
-            await delay(stepDelay);
-            await waitForResume();
-            updateExplanation("Step 13 (Attack): Attacker sends ChangeCipherSpec & Finished to Server.");
-            await addMessage('Attacker', 'Server', 'ChangeCipherSpec');
-            await waitForResume(); // Added wait before second message
-            await addMessage('Attacker', 'Server', 'Finished (Encrypted)');
-            await waitForResume();
-            await delay(stepDelay);
-
-            // --> ADD Key Derivation Step (Attacker <-> Server) <--
-            await waitForResume();
-            updateExplanation("Step 13.5 (Attack): Attacker (posing as Client) & Server derive Session Keys for Attacker<->Server leg.");
-            await delay(stepDelay / 2); // Shorter pause
-
-            // 7. Server responds to Attacker
-            await waitForResume();
-            updateExplanation("Step 14 (Attack): Server completes its side of the handshake with Attacker.");
-            await addMessage('Server', 'Attacker', 'ChangeCipherSpec');
-            await waitForResume(); // Added wait before second message
-            await addMessage('Server', 'Attacker', 'Finished (Encrypted)');
-            await waitForResume();
-            await delay(stepDelay);
-
-            // 8. Attacker responds to Client
-            await waitForResume();
-            updateExplanation("Step 15 (Attack): Attacker completes its side of the handshake with Client.");
-            await addMessage('Attacker', 'Client', 'ChangeCipherSpec');
-            await waitForResume(); // Added wait before second message
-            await addMessage('Attacker', 'Client', 'Finished (Encrypted)');
-            await waitForResume();
-            await delay(stepDelay);
-
-            await waitForResume();
-            updateExplanation("MitM Attack Successful! Attacker sits between Client and Server, decrypting traffic.");
-            await delay(stepDelay); // Pause briefly after handshake
-
-            // Post-Handshake Data Exchange (Intercepted)
-            await waitForResume();
-            updateExplanation("Step 16 (Attack): Client sends encrypted data, intercepted by Attacker.");
-            await addMessage('Client', 'Attacker', 'Application Data (Encrypted, Intercepted)');
-            await waitForResume();
-            await delay(stepDelay);
-
-            await waitForResume();
-            updateExplanation("Step 17 (Attack): Attacker decrypts, reads (and potentially modifies) the data.");
-            // No visual for decryption, just text
-            await waitForResume();
-            await delay(stepDelay);
-
-            await waitForResume();
-            updateExplanation("Step 18 (Attack): Attacker re-encrypts and forwards data to Server.");
-            await addMessage('Attacker', 'Server', 'Application Data (Re-encrypted)');
-            await waitForResume();
-            await delay(stepDelay);
-
-            await waitForResume();
-            updateExplanation("Step 19 (Attack): Server sends encrypted data, intercepted by Attacker.");
-            await addMessage('Server', 'Attacker', 'Application Data (Encrypted, Intercepted)');
-            await waitForResume();
-            await delay(stepDelay);
-
-            await waitForResume();
-            updateExplanation("Step 20 (Attack): Attacker decrypts, reads (and potentially modifies) the data.");
-            // No visual for decryption, just text
-            await waitForResume();
-            await delay(stepDelay);
-
-            await waitForResume();
-            updateExplanation("Step 21 (Attack): Attacker re-encrypts and forwards data to Client.");
-            await addMessage('Attacker', 'Client', 'Application Data (Re-encrypted)');
-            await waitForResume();
-            await delay(stepDelay);
-
-            await waitForResume();
-            updateExplanation("End of MitM Simulation. Attacker controls the communication.");
-
-         } catch (error) {
-            console.error("Simulation error:", error);
-            explanationText.textContent = "An error occurred during the simulation.";
-            throw error; // Re-throw error to be caught by runSimulation
-        } finally {
-             // Remove button state logic from here
-            // simulationRunning = false;
-            // isPaused = false;
-            // startButton.disabled = false;
-            // toggleAttackButton.disabled = false;
-            // pauseButton.classList.add('hidden');
-            // resumeButton.classList.add('hidden');
-            // replayButton.disabled = false; 
-            // clearButton.disabled = false;
-        }
+        updateExplanation(`${tlsVersion} Handshake Complete. Starting Quiz...`); // Final update before quiz.
     }
 
     // Async function to handle message display with animation
-    async function addMessage(from, to, content) {
-        const fromNode = document.getElementById(from.toLowerCase());
-        const toNode = document.getElementById(to.toLowerCase());
+    async function addMessage(from, to, content, tlsVersion) {
+        const fromNode = from;
+        const toNode = to;
         const messagesContainer = document.getElementById('messages'); // Container for positioning
 
         if (!fromNode || !toNode) {
-            console.error(`Node not found for message: ${from} -> ${to}`);
-            // Fallback to just adding text if nodes aren't found
-            logMessage(from, to, content);
+            console.error(`Node element not found for message: ${from?.id || 'unknown'} -> ${to?.id || 'unknown'}`);
+            // Fallback to logging with IDs if possible, pass the received tlsVersion
+            logMessage(from?.id || 'System', to?.id || 'System', content, tlsVersion);
             return;
         }
+
+        // Extract string IDs for logging
+        const fromId = fromNode.id; // e.g., 'client', 'server', 'attacker'
+        const toId = toNode.id;
 
         // Create the packet element
         const packet = document.createElement('div');
@@ -703,8 +616,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Remove the packet after animation
         packet.remove();
 
-        // Add the text message to the log area
-        logMessage(from, to, content);
+        // Add the text message to the log area using the extracted IDs and passing the received version value
+        logMessage(fromId, toId, content, tlsVersion);
     }
 
     // Tooltip Functions
@@ -739,11 +652,12 @@ document.addEventListener('DOMContentLoaded', () => {
         tooltipElement.style.top = `${y + window.scrollY}px`;
     }
 
-    // Separate function just for adding text to the log
-    function logMessage(from, to, content) {
+    // Adds a textual representation of a message to the messages log area.
+    // Handles raw data view, styling, tooltips, and certificate click handlers.
+    function logMessage(from, to, content, tlsVersion) {
         // Clear placeholder text only when the first actual message is added
         if (messagesDiv.querySelector('.placeholder-message')) {
-            messagesDiv.innerHTML = ''; 
+            messagesDiv.innerHTML = '';
         }
 
         const messageElement = document.createElement('div');
@@ -756,13 +670,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (content.includes('ServerKeyExchange / ServerHelloDone')) messageKey = 'ServerKeyExchange / ServerHelloDone';
         if (content.includes('Finished (Encrypted)')) messageKey = 'Finished (Encrypted)';
         if (content.includes('ClientHello (Intercepted)')) messageKey = 'ClientHello (Intercepted)';
-        if (content.includes('Certificate (Server\'s REAL Cert)')) messageKey = 'Certificate (Server\'s REAL Cert)';
-        if (content.includes('Certificate (Attacker\'s FAKE Cert)')) messageKey = 'Certificate (Attacker\'s FAKE Cert)';
-        if (content.includes('ClientKeyExchange (Encrypted with FAKE key)')) messageKey = 'ClientKeyExchange (Encrypted with FAKE key)';
-        if (content.includes('ClientKeyExchange (Encrypted with REAL key)')) messageKey = 'ClientKeyExchange (Encrypted with REAL key)';
+        if (content.includes("Certificate (Server's REAL Cert)")) messageKey = "Certificate (Server's REAL Cert)";
+        if (content.includes("Certificate (Attacker's FAKE Cert)")) messageKey = "Certificate (Attacker's FAKE Cert)";
+        if (content.includes("ClientKeyExchange (Encrypted with FAKE key)")) messageKey = "ClientKeyExchange (Encrypted with FAKE key)";
+        if (content.includes("ClientKeyExchange (Encrypted with REAL key)")) messageKey = "ClientKeyExchange (Encrypted with REAL key)";
 
         // Simplified "Raw" data placeholder
-        const rawData = generateRawData(messageKey);
+        const rawData = generateRawData(messageKey, tlsVersion);
+        let baseHtml = ''; // Store the base message HTML
 
         // Add specific class based on sender
         if (from.toLowerCase() === 'client') {
@@ -773,48 +688,52 @@ document.addEventListener('DOMContentLoaded', () => {
             messageElement.classList.add('attacker-msg');
         }
 
-        // Set content based on raw view toggle
+        // Set base content based on message type
         if (messageKey.includes('Certificate')) {
             let certType = 'normal-server'; // Default for secure handshake
             if (messageKey === "Certificate (Server's REAL Cert)") {
                 certType = 'real-server-mitm';
             } else if (messageKey === "Certificate (Attacker's FAKE Cert)") {
                 certType = 'fake-attacker';
-            } // If just 'Certificate', it remains 'normal-server'
+            }
 
             messageElement.classList.add('clickable-certificate');
             messageElement.style.cursor = 'pointer';
             messageElement.dataset.certType = certType; // Store type
 
-            // Let's adjust how we add the text to be more robust
-            const strongPart = document.createElement('strong');
-            strongPart.textContent = `[${from} -> ${to}]: ${content}`;
-            const smallPart = document.createElement('small');
-            smallPart.style.fontStyle = 'italic';
-            smallPart.style.marginLeft = '5px'; // Add some space
-            smallPart.textContent = '(Click for details)';
-            
-            // Clear existing content before adding new structure
-            messageElement.innerHTML = ''; 
-            messageElement.appendChild(strongPart);
-            messageElement.appendChild(smallPart);
+            const strongPart = `<strong>[${escapeHtml(from)} -> ${escapeHtml(to)}]: ${escapeHtml(content)}</strong>`;
+            const smallPart = `<small style="font-style: italic; margin-left: 5px;">(Click for details)</small>`;
+            baseHtml = strongPart + smallPart;
 
         } else {
              // For non-certificate messages, just set the main text
-             messageElement.innerHTML = `<strong>[${from} -> ${to}]: ${content}</strong>`;
+             baseHtml = `<strong>[${escapeHtml(from)} -> ${escapeHtml(to)}]: ${escapeHtml(content)}</strong>`;
         }
 
-        // Add raw data if needed (append to existing innerHTML)
+        messageElement.innerHTML = baseHtml; // Set the base HTML first
+
+        // Add raw data if needed, appending to existing baseHtml
         if (showRaw && rawData) {
-            // Need to check if innerHTML was already set
-            if (messageElement.innerHTML) {
-                 messageElement.innerHTML += `<br><pre class="raw-data">${rawData}</pre>`;
-            } else {
-                 // Fallback if somehow innerHTML is empty (shouldn't happen often)
-                 messageElement.innerHTML = `<pre class="raw-data">${rawData}</pre>`;
+            let rawPart = rawData;
+            let notesPart = '';
+            const notesMarker = '\nNotes:\n';
+            const notesIndex = rawData.indexOf(notesMarker);
+
+            if (notesIndex !== -1) {
+                rawPart = rawData.substring(0, notesIndex);
+                notesPart = rawData.substring(notesIndex + 1); // Get "Notes:\n..." part, skip leading newline
             }
+
+            // Construct the <pre> block content with escaped parts
+            let rawHtmlContent = escapeHtml(rawPart);
+            if (notesPart) {
+                // Add notes part wrapped in a span
+                rawHtmlContent += `<span class="raw-notes">${escapeHtml(notesPart)}</span>`;
+            }
+
+            messageElement.innerHTML += `<br><pre class="raw-data">${rawHtmlContent}</pre>`;
         }
-       
+
         messagesDiv.appendChild(messageElement);
 
         // Scroll to the bottom
@@ -823,58 +742,154 @@ document.addEventListener('DOMContentLoaded', () => {
         // Add tooltip event listeners if content is available
         if (tooltipContent[messageKey]) {
             messageElement.classList.add('has-tooltip');
-            // Attach to the main element, not just text content if using innerHTML
             messageElement.addEventListener('mouseover', (e) => showTooltip(e, messageKey));
             messageElement.addEventListener('mousemove', moveTooltip);
             messageElement.addEventListener('mouseout', hideTooltip);
         }
 
-        // Make certificate messages clickable
+        // Make certificate messages clickable (listeners are added via delegation earlier)
+        // The code block below was redundant as click handling is done via delegation
+        /*
         if (messageKey.includes('Certificate')) {
             let certType = 'normal-server'; // Default for secure handshake
             if (messageKey === "Certificate (Server's REAL Cert)") {
                 certType = 'real-server-mitm';
             } else if (messageKey === "Certificate (Attacker's FAKE Cert)") {
                 certType = 'fake-attacker';
-            } // If just 'Certificate', it remains 'normal-server'
+            }
 
             messageElement.classList.add('clickable-certificate');
             messageElement.style.cursor = 'pointer';
             messageElement.dataset.certType = certType; // Store type
         }
+        */
     }
 
     // Helper to generate placeholder raw data
-    function generateRawData(messageKey) {
+    function generateRawData(messageKey, tlsVersion) {
+        const versionMap = {
+            'ssl3.0': 'SSL 3.0 (0x0300)',
+            'tls1.0': 'TLS 1.0 (0x0301)',
+            'tls1.1': 'TLS 1.1 (0x0302)',
+            'tls1.2': 'TLS 1.2 (0x0303)',
+            'tls1.3': 'TLS 1.2 (0x0303)', // TLS 1.3 uses 0x0303 in record layer for compatibility
+        };
+
+        const versionString = versionMap[tlsVersion] || 'TLS 1.2 (0x0303)';
+        let rawData = '';
+        let notes = '\nNotes:\n'; // Start notes section
+
         switch(messageKey) {
             case 'ClientHello':
             case 'ClientHello (Intercepted)':
-                return `Record Type: Handshake (22)\n  Version: TLS 1.2 (0x0303)\n  Handshake Type: Client Hello (1)\n    Random: [32 bytes]\n    Cipher Suites Length: 8\n    Cipher Suites (4 suites):\n      Cipher Suite: TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 (0xc02f)\n      Cipher Suite: TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 (0xc030)\n      Cipher Suite: TLS_RSA_WITH_AES_128_GCM_SHA256 (0x009c)\n      Cipher Suite: TLS_RSA_WITH_AES_256_GCM_SHA384 (0x009d)\n    Extensions (example):\n      Extension: server_name (SNI), Length: 18, Name: SecureServer.com\n      Extension: application_layer_protocol_negotiation (ALPN), Length: 8, Prot: http/1.1`;
+                rawData = `Record Type: Handshake (22)\n  Version: ${versionString}\n  Handshake Type: Client Hello (1)\n    Random: [32 bytes]\n    Cipher Suites Length: 8\n    Cipher Suites (4 suites):\n      Cipher Suite: TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 (0xc02f)\n      Cipher Suite: TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 (0xc030)\n      Cipher Suite: TLS_RSA_WITH_AES_128_GCM_SHA256 (0x009c)\n      Cipher Suite: TLS_RSA_WITH_AES_256_GCM_SHA384 (0x009d)\n    Extensions (example):\n      Extension: server_name (SNI), Length: 18, Name: SecureServer.com\n      Extension: application_layer_protocol_negotiation (ALPN), Length: 8, Prot: http/1.1`;
+                notes += ` - Client proposes highest TLS version it supports and a list of cipher suites.\n`;
+                notes += ` - Random value is used later for key generation.\n`;
+                notes += ` - SNI extension tells server which hostname client wants to connect to.\n`;
+                notes += ` - ALPN suggests application protocols (like HTTP/1.1 or h2).\n`;
+                if (tlsVersion === 'tls1.3') {
+                    rawData = rawData.replace('TLS 1.2 (0x0303)', 'TLS 1.3 (0x0304) in Handshake Layer'); // Correct inner handshake version for TLS 1.3
+                    rawData += '\n      Extension: supported_versions, Version: TLS 1.3 (0x0304)\n      Extension: key_share, Group: secp256r1, Key Exchange: [65 bytes]';
+                    notes += ' - TLS 1.3 includes proposed key share material for faster setup.\n';
+                    notes += ' - Record Layer Version is TLS 1.2 for compatibility, actual version in extension.\n';
+                } else if (tlsVersion === 'ssl3.0') {
+                     notes += ' - SSL 3.0 is INSECURE due to POODLE and weak ciphers.\n';
+                }
+                break;
             case 'ServerHello':
-                return `Record Type: Handshake (22)\n  Version: TLS 1.2 (0x0303)\n  Handshake Type: Server Hello (2)\n    Random: [32 bytes]\n    Session ID Length: 32\n    Session ID: [32 bytes]\n    Cipher Suite: TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 (0xc02f)\n    Extensions (example):\n      Extension: application_layer_protocol_negotiation (ALPN), Length: 8, Prot: http/1.1`;
+                rawData = `Record Type: Handshake (22)\n  Version: ${versionString}\n  Handshake Type: Server Hello (2)\n    Random: [32 bytes]\n    Session ID Length: 32\n    Session ID: [32 bytes]\n    Cipher Suite: TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 (0xc02f)\n    Extensions (example):\n      Extension: application_layer_protocol_negotiation (ALPN), Length: 8, Prot: http/1.1`;
+                notes += ` - Server confirms chosen TLS version and cipher suite.\n`;
+                notes += ` - Server provides its own Random value.\n`;
+                notes += ` - Session ID can be used for session resumption (faster subsequent handshakes).\n`;
+                 if (tlsVersion === 'tls1.3') {
+                    rawData = rawData.replace('TLS 1.2 (0x0303)', 'TLS 1.3 (0x0304) in Handshake Layer');
+                    rawData += '\n      Extension: supported_versions, Version: TLS 1.3 (0x0304)\n      Extension: key_share, Group: secp256r1, Key Exchange: [65 bytes]';
+                    notes += ' - TLS 1.3 selects a key share from client\'s proposals.\n';
+                } else if (tlsVersion === 'ssl3.0') {
+                    notes += ' - SSL 3.0 handshake details differ significantly (e.g., no extensions shown here).\n';
+                    notes += ' - Still INSECURE!\n';
+                }
+                break;
             case 'Certificate':
             case "Certificate (Server's REAL Cert)":
             case "Certificate (Attacker's FAKE Cert)":
                  let issuer = messageKey.includes("FAKE") ? "Untrusted Self-Signed CA" : "Trusted Root CA";
                  let subject = "CN=SecureServer.com";
-                 return `Record Type: Handshake (22)\n  Version: TLS 1.2 (0x0303)\n  Handshake Type: Certificate (11)\n    Certificates Length: [Total Length]\n    Certificate Chain Length: [Chain Length]\n      Certificate Length: [Cert 1 Length]\n        Subject: ${subject}\n        Issuer: ${issuer}\n        Serial Number: [Example Serial]\n        Validity: Not Before: Jan 1 2023, Not After: Jan 1 2025\n        Public Key: RSA (2048 bit)\n      Certificate Length: [Cert 2 Length (if any)]\n        Subject: ${issuer}\n        Issuer: [Higher Level CA or Self]`;
+                 rawData = `Record Type: Handshake (22)\n  Version: ${versionString}\n  Handshake Type: Certificate (11)\n    Certificates Length: [Total Length]\n    Certificate Chain Length: [Chain Length]\n      Certificate Length: [Cert 1 Length]\n        Subject: ${subject}\n        Issuer: ${issuer}\n        Serial Number: [Example Serial]\n        Validity: Not Before: Jan 1 2023, Not After: Jan 1 2025\n        Public Key: RSA (2048 bit)\n      Certificate Length: [Cert 2 Length (if any)]\n        Subject: ${issuer}\n        Issuer: [Higher Level CA or Self]`;
+                 notes += ` - Contains the server's public key and identity information.\n`;
+                 notes += ` - Client MUST verify the certificate chain against its trusted root CAs.\n`;
+                 if (messageKey.includes("FAKE")) {
+                    notes += ` - WARNING: Fake certificate! Issuer is untrusted. Classic MitM sign.\n`;
+                 } else if (messageKey.includes("REAL")) {
+                    notes += ` - This is the real certificate, intercepted by the attacker.\n`;
+                 }
+                 if (tlsVersion === 'ssl3.0') {
+                    notes += ' - Certificate validation is crucial, but SSL 3.0 weaknesses might bypass some checks.\n';
+                 }
+                break;
             case 'ServerKeyExchange / ServerHelloDone':
-                 return `Record Type: Handshake (22)\n  Version: TLS 1.2 (0x0303)\n  Handshake Type: Server Key Exchange (12)\n    EC Diffie-Hellman Server Params:\n      Curve Type: named_curve (3)\n      Named Curve: secp256r1 (0x0017)\n      Pubkey: [65 bytes Uncompressed Point]\n      Signature Algorithm: rsa_pkcs1_sha256 (0x0401)\n      Signature: [Encrypted Hash of Params]\n-- THEN --\nRecord Type: Handshake (22)\n  Version: TLS 1.2 (0x0303)\n  Handshake Type: Server Hello Done (14)`;
+                 rawData = `Record Type: Handshake (22)\n  Version: ${versionString}\n  Handshake Type: Server Key Exchange (12)\n    EC Diffie-Hellman Server Params:\n      Curve Type: named_curve (3)\n      Named Curve: secp256r1 (0x0017)\n      Pubkey: [65 bytes Uncompressed Point]\n      Signature Algorithm: rsa_pkcs1_sha256 (0x0401)\n      Signature: [Encrypted Hash of Params]\n-- THEN --\nRecord Type: Handshake (22)\n  Version: ${versionString}\n  Handshake Type: Server Hello Done (14)`;
+                 notes += ` - ServerKeyExchange is needed for ephemeral key agreement (like DHE/ECDHE).\n`;
+                 notes += ` - Contains parameters (e.g., DH public value) signed by server's long-term key (from certificate).\n`;
+                 notes += ` - ServerHelloDone indicates server finished sending its initial messages.\n`;
+                 if (tlsVersion === 'ssl3.0') {
+                    notes += ' - ServerKeyExchange not typically used for RSA key exchange in SSL 3.0.\n';
+                 }
+                break;
             case 'ClientKeyExchange':
             case "ClientKeyExchange (Encrypted with FAKE key)":
             case "ClientKeyExchange (Encrypted with REAL key)":
-                return `Record Type: Handshake (22)\n  Version: TLS 1.2 (0x0303)\n  Handshake Type: Client Key Exchange (16)\n    Encrypted PreMaster Secret: [Length (e.g., 256 bytes for RSA)]`;
+                rawData = `Record Type: Handshake (22)\n  Version: ${versionString}\n  Handshake Type: Client Key Exchange (16)\n    Encrypted PreMaster Secret: [Length (e.g., 256 bytes for RSA)]`;
+                notes += ` - Contains client's contribution to the key material.\n`;
+                if (tlsVersion === 'ssl3.0' || tlsVersion === 'tls1.0' || tlsVersion === 'tls1.1' || tlsVersion === 'tls1.2') {
+                    // Example for RSA Key Exchange (common in older versions or non-PFS ciphers)
+                    notes += ` - For RSA key exchange: Contains the Pre-Master Secret, encrypted with server's public key.\n`;
+                    // Example for ECDHE (more modern)
+                    // notes += ` - For ECDHE: Contains the client's ephemeral public key.\n`;
+                }
+                if (messageKey.includes("FAKE key")) {
+                    notes += ` - Encrypted with ATTACKER's public key! Attacker can decrypt the secret.\n`;
+                } else if (messageKey.includes("REAL key")) {
+                     notes += ` - Attacker re-encrypts secret with REAL server key to forward it.\n`;
+                }
+                break;
             case 'ChangeCipherSpec':
-                return `Record Type: Change Cipher Spec (20)\n  Version: TLS 1.2 (0x0303)\n  Message: [1]`;
+                rawData = `Record Type: Change Cipher Spec (20)\n  Version: ${versionString}\n  Message: [1]`;
+                notes += ` - Signals that subsequent records will be encrypted with the newly negotiated keys.\n`;
+                notes += ` - It's actually a separate record type, not technically a handshake message.\n`;
+                break;
             case 'Finished (Encrypted)':
-                return `Record Type: Handshake (22) - Encrypted Handshake Message\n  Version: TLS 1.2 (0x0303)\n    Handshake Type: Finished (20)\n    Verify Data: [12 bytes for TLS 1.2]`;
+                rawData = `Record Type: Handshake (22) - Encrypted Handshake Message\n  Version: ${versionString}\n    Handshake Type: Finished (20)\n    Verify Data: [12 bytes for TLS 1.2]`;
+                notes += ` - First encrypted message. Contains hash of all preceding handshake messages.\n`;
+                notes += ` - Verifies integrity of the handshake and confirms key exchange success.\n`;
+                if (tlsVersion === 'ssl3.0') {
+                    notes += ` - SSL 3.0 uses weaker hashes (MD5+SHA1) making it less secure.\n`;
+                }
+                break;
             case 'Application Data (Encrypted)':
             case 'Application Data (Encrypted, Intercepted)':
             case 'Application Data (Re-encrypted)':
-                 return `Record Type: Application Data (23)\n  Version: TLS 1.2 (0x0303)\n  Encrypted Application Data: [Variable Length + Auth Tag (GCM)]`;
+                 rawData = `Record Type: Application Data (23)\n  Version: ${versionString}\n  Encrypted Application Data: [Variable Length + Auth Tag (GCM)]`;
+                 notes += ` - Actual application payload (e.g., HTTP request/response) encrypted using session keys.\n`;
+                 if (messageKey.includes("Intercepted")) {
+                     notes += ` - Attacker decrypts this using keys established with the sender.\n`;
+                 } else if (messageKey.includes("Re-encrypted")) {
+                     notes += ` - Attacker re-encrypts (possibly modified) data using keys for the receiver.\n`;
+                 }
+                 if (tlsVersion === 'ssl3.0') {
+                    notes += ' - If using CBC ciphers, vulnerable to POODLE attack!\n';
+                 }
+                break;
             default:
                 return null; // No raw data for other types
         }
+
+        // Append notes if any were added
+        if (notes !== '\nNotes:\n') {
+            rawData += notes;
+        }
+
+        return rawData;
     }
 
     // Quiz Functions ------------------------------------------
@@ -1010,8 +1025,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         modalTitle.textContent = data.title;
-        modalBody.innerHTML = `
-            <p><strong>Issued To:</strong> ${data.issuedTo}</p>
+        modalBody.innerHTML = `            <p><strong>Issued To:</strong> ${data.issuedTo}</p>
             <p><strong>Issued By:</strong> ${data.issuedBy}</p>
             <p><strong>Valid From:</strong> ${data.validFrom}</p>
             <p><strong>Valid To:</strong> ${data.validTo}</p>
@@ -1035,5 +1049,302 @@ document.addEventListener('DOMContentLoaded', () => {
         // Force reflow/repaint before adding class again - setTimeout is a common way
         void explanationSection.offsetWidth; // Trigger reflow (alternative to setTimeout)
         explanationSection.classList.add('step-highlight');
+    }
+
+    async function simulateAttackHandshake(tlsVersion) {
+        console.log(`Simulating MitM attack for ${tlsVersion}...`);
+        updateExplanation(`Starting ${tlsVersion} MitM Attack Simulation...`);
+        await delay(stepDelay / 2);
+
+        // Version-specific MitM handshake logic.
+        switch (tlsVersion) {
+            case 'tls1.3':
+                 // MitM flow for TLS 1.3 (simplified - real MitM is harder).
+                // Attacker establishes separate sessions with client and server.
+                await addMessage(clientNode, attackerNode, 'ClientHello (Intercepted)', tlsVersion);
+                updateExplanation('TLS 1.3 MitM: Attacker intercepts ClientHello.');
+                console.log("Before await waitForResume (MitM TLS 1.3 - 1)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, serverNode, 'ClientHello', tlsVersion);
+                updateExplanation('TLS 1.3 MitM: Attacker forwards ClientHello to Server.');
+                console.log("Before await waitForResume (MitM TLS 1.3 - 2)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, attackerNode, 'ServerHello', tlsVersion);
+                updateExplanation('TLS 1.3 MitM: Attacker intercepts ServerHello.');
+                console.log("Before await waitForResume (MitM TLS 1.3 - 3)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, attackerNode, 'EncryptedExtensions', tlsVersion);
+                updateExplanation('TLS 1.3 MitM: Attacker intercepts EncryptedExtensions.');
+                console.log("Before await waitForResume (MitM TLS 1.3 - 4)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, attackerNode, 'Certificate (TLS 1.3)', tlsVersion);
+                updateExplanation('TLS 1.3 MitM: Attacker intercepts Server Certificate.');
+                console.log("Before await waitForResume (MitM TLS 1.3 - 5)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, attackerNode, 'CertificateVerify (TLS 1.3)', tlsVersion);
+                updateExplanation('TLS 1.3 MitM: Attacker intercepts Server CertificateVerify.');
+                console.log("Before await waitForResume (MitM TLS 1.3 - 6)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, attackerNode, 'Finished (Encrypted, TLS 1.3)', tlsVersion);
+                updateExplanation('TLS 1.3 MitM: Attacker intercepts Server Finished.');
+                console.log("Before await waitForResume (MitM TLS 1.3 - 7)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Attacker now talks to client (using fake cert etc)
+                await addMessage(attackerNode, clientNode, 'ServerHello', tlsVersion);
+                updateExplanation('TLS 1.3 MitM: Attacker sends own ServerHello to Client.');
+                console.log("Before await waitForResume (MitM TLS 1.3 - 8)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, clientNode, 'EncryptedExtensions', tlsVersion);
+                updateExplanation('TLS 1.3 MitM: Attacker sends own EncryptedExtensions.');
+                console.log("Before await waitForResume (MitM TLS 1.3 - 9)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, clientNode, 'Certificate (Attacker FAKE Cert)', tlsVersion);
+                updateExplanation('TLS 1.3 MitM: Attacker sends FAKE Certificate to Client.');
+                console.log("Before await waitForResume (MitM TLS 1.3 - 10)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, clientNode, 'CertificateVerify (TLS 1.3)', tlsVersion);
+                updateExplanation('TLS 1.3 MitM: Attacker sends own CertificateVerify.');
+                console.log("Before await waitForResume (MitM TLS 1.3 - 11)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, clientNode, 'Finished (Encrypted, TLS 1.3)', tlsVersion);
+                updateExplanation('TLS 1.3 MitM: Attacker sends own Finished to Client.');
+                console.log("Before await waitForResume (MitM TLS 1.3 - 12)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Client finishes its side
+                await addMessage(clientNode, attackerNode, 'Finished (Encrypted, TLS 1.3)', tlsVersion);
+                updateExplanation('TLS 1.3 MitM: Attacker intercepts Client Finished.');
+                console.log("Before await waitForResume (MitM TLS 1.3 - 13)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Attacker forwards to server
+                await addMessage(attackerNode, serverNode, 'Finished (Encrypted, TLS 1.3)', tlsVersion);
+                updateExplanation('TLS 1.3 MitM: Attacker forwards Finished to Server. Handshake complete (MitM!).');
+                console.log("Before await waitForResume (MitM TLS 1.3 - 14)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Application Data Flow (Intercepted)
+                await addMessage(clientNode, attackerNode, 'Application Data (Encrypted, Intercepted)', tlsVersion);
+                updateExplanation('TLS 1.3 MitM: Attacker intercepts encrypted data from Client.');
+                console.log("Before await waitForResume (MitM TLS 1.3 - 15)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, serverNode, 'Application Data (Re-encrypted)', tlsVersion);
+                updateExplanation('TLS 1.3 MitM: Attacker re-encrypts and forwards data to Server.');
+                console.log("Before await waitForResume (MitM TLS 1.3 - 16)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, attackerNode, 'Application Data (Encrypted, Intercepted)', tlsVersion);
+                updateExplanation('TLS 1.3 MitM: Attacker intercepts encrypted data from Server.');
+                console.log("Before await waitForResume (MitM TLS 1.3 - 17)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, clientNode, 'Application Data (Re-encrypted)', tlsVersion);
+                updateExplanation('TLS 1.3 MitM: Attacker re-encrypts and forwards data to Client.');
+                console.log("Before await waitForResume (MitM TLS 1.3 - 18)"); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                break;
+
+            case 'tls1.2':
+            case 'tls1.1':
+            case 'tls1.0':
+                 // MitM flow for TLS 1.0-1.2 (example assuming ECDHE).
+                await addMessage(clientNode, attackerNode, 'ClientHello (Intercepted)', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker intercepts ClientHello.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 1)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, serverNode, 'ClientHello', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker forwards ClientHello to Server.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 2)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, attackerNode, 'ServerHello', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker intercepts ServerHello.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 3)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, attackerNode, 'Certificate (Server REAL Cert)', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker intercepts REAL Server Certificate.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 4)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, attackerNode, 'ServerKeyExchange', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker intercepts ServerKeyExchange.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 5)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, attackerNode, 'ServerHelloDone', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker intercepts ServerHelloDone.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 6)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Attacker talks to client
+                await addMessage(attackerNode, clientNode, 'ServerHello', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker sends own ServerHello to Client.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 7)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, clientNode, 'Certificate (Attacker FAKE Cert)', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker sends FAKE Certificate to Client.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 8)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, clientNode, 'ServerKeyExchange', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker performs own KeyExchange with Client.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 9)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, clientNode, 'ServerHelloDone', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker sends own ServerHelloDone.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 10)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Client sends its part
+                await addMessage(clientNode, attackerNode, 'ClientKeyExchange', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker intercepts ClientKeyExchange.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 11)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(clientNode, attackerNode, 'ChangeCipherSpec', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker intercepts Client ChangeCipherSpec.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 12)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(clientNode, attackerNode, 'Finished (Encrypted)', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker intercepts Client Finished.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 13)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Attacker forwards (potentially modified) to server
+                await addMessage(attackerNode, serverNode, 'ClientKeyExchange', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker forwards ClientKeyExchange to Server.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 14)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, serverNode, 'ChangeCipherSpec', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker sends ChangeCipherSpec to Server.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 15)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, serverNode, 'Finished (Encrypted)', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker sends Finished to Server.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 16)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Server sends its final part
+                await addMessage(serverNode, attackerNode, 'ChangeCipherSpec', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker intercepts Server ChangeCipherSpec.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 17)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, attackerNode, 'Finished (Encrypted)', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker intercepts Server Finished.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 18)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Attacker sends final part to client
+                await addMessage(attackerNode, clientNode, 'ChangeCipherSpec', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker sends ChangeCipherSpec to Client.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 19)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, clientNode, 'Finished (Encrypted)', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker sends Finished to Client. Handshake complete (MitM!).`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 20)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Application Data Flow
+                await addMessage(clientNode, attackerNode, 'Application Data (Encrypted, Intercepted)', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker intercepts encrypted data from Client.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 21)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, serverNode, 'Application Data (Re-encrypted)', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker re-encrypts and forwards data to Server.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 22)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, attackerNode, 'Application Data (Encrypted, Intercepted)', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker intercepts encrypted data from Server.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 23)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, clientNode, 'Application Data (Re-encrypted)', tlsVersion);
+                updateExplanation(`${tlsVersion} MitM: Attacker re-encrypts and forwards data to Client.`);
+                console.log(`Before await waitForResume (MitM ${tlsVersion} - 24)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                break;
+
+            case 'ssl3.0':
+                 // MitM flow for SSL 3.0 (example using RSA).
+                await addMessage(clientNode, attackerNode, 'ClientHello (Intercepted)', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker intercepts ClientHello.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 1)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, serverNode, 'ClientHello', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker forwards ClientHello.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 2)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, attackerNode, 'ServerHello', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker intercepts ServerHello.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 3)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, attackerNode, 'Certificate (Server REAL Cert)', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker intercepts REAL Server Certificate.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 4)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, attackerNode, 'ServerHelloDone', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker intercepts ServerHelloDone.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 5)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Attacker to Client
+                await addMessage(attackerNode, clientNode, 'ServerHello', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker sends own ServerHello to Client.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 6)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, clientNode, 'Certificate (Attacker FAKE Cert)', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker sends FAKE Certificate to Client.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 7)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, clientNode, 'ServerHelloDone', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker sends own ServerHelloDone.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 8)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Client -> Attacker
+                await addMessage(clientNode, attackerNode, 'ClientKeyExchange (Encrypted with FAKE key)', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker intercepts ClientKeyExchange (can decrypt!).`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 9)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(clientNode, attackerNode, 'ChangeCipherSpec', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker intercepts Client ChangeCipherSpec.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 10)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(clientNode, attackerNode, 'Finished (Encrypted)', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker intercepts Client Finished.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 11)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Attacker -> Server
+                await addMessage(attackerNode, serverNode, 'ClientKeyExchange (Encrypted with REAL key)', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker re-encrypts/sends KeyExchange to Server.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 12)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, serverNode, 'ChangeCipherSpec', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker sends ChangeCipherSpec to Server.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 13)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, serverNode, 'Finished (Encrypted)', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker sends Finished to Server.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 14)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Server -> Attacker
+                await addMessage(serverNode, attackerNode, 'ChangeCipherSpec', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker intercepts Server ChangeCipherSpec.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 15)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, attackerNode, 'Finished (Encrypted)', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker intercepts Server Finished.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 16)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                // Attacker -> Client
+                await addMessage(attackerNode, clientNode, 'ChangeCipherSpec', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker sends ChangeCipherSpec to Client.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 17)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, clientNode, 'Finished (Encrypted)', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker sends Finished to Client. Handshake complete (MitM!).`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 18)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                 // Application Data Flow
+                await addMessage(clientNode, attackerNode, 'Application Data (Encrypted, Intercepted)', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker intercepts encrypted data from Client.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 19)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, serverNode, 'Application Data (Re-encrypted)', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker re-encrypts data to Server.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 20)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(serverNode, attackerNode, 'Application Data (Encrypted, Intercepted)', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker intercepts encrypted data from Server.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 21)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                await addMessage(attackerNode, clientNode, 'Application Data (Re-encrypted)', tlsVersion);
+                updateExplanation(`SSL 3.0 MitM: Attacker re-encrypts data to Client.`);
+                console.log(`Before await waitForResume (MitM SSL 3.0 - 22)`); // DIAGNOSTIC
+                await waitForResume(); if (simulationStopped) return;
+                break;
+        }
+        updateExplanation(`${tlsVersion} MitM Attack Complete. Starting Quiz...`); // Final update before quiz.
     }
 });

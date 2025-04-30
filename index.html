@@ -43,6 +43,17 @@
             <h2>Controls</h2>
             <button id="start-simulation">Start Handshake</button>
             <button id="toggle-attack">Inject Attacker</button>
+            <div class="control-option">
+                <label for="tls-version-select">Protocol Version:</label>
+                <select id="tls-version-select" name="tls-version">
+                    <option value="tls1.3">TLS 1.3</option>
+                    <option value="tls1.2" selected>TLS 1.2</option>
+                    <option value="tls1.1">TLS 1.1</option>
+                    <option value="tls1.0">TLS 1.0</option>
+                    <option value="ssl3.0">SSL 3.0</option>
+                    <!-- <option value="ssl2.0">SSL 2.0</option> --> <!-- Maybe add later if needed -->
+                </select>
+            </div>
             <div class="simulation-controls">
                 <button id="pause-simulation" class="hidden">Pause</button>
                 <button id="resume-simulation" class="hidden">Resume</button>
