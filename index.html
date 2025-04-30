@@ -34,6 +34,12 @@
                     <span class="node-label">Server</span>
                 </div>
             </div>
+            <section id="explanation">
+                <h3>Explanation</h3>
+                <div id="explanation-text">
+                    Welcome! Click "Start Handshake" to see a secure TLS connection being established.
+                </div>
+            </section>
             <div id="messages">
                 <!-- Messages will be added dynamically here -->
             </div>
@@ -41,8 +47,6 @@
 
         <section id="controls">
             <h2>Controls</h2>
-            <button id="start-simulation">Start Handshake</button>
-            <button id="toggle-attack">Inject Attacker</button>
             <div class="control-option">
                 <label for="tls-version-select">Protocol Version:</label>
                 <select id="tls-version-select" name="tls-version">
@@ -54,35 +58,23 @@
                     <!-- <option value="ssl2.0">SSL 2.0</option> --> <!-- Maybe add later if needed -->
                 </select>
             </div>
-            <div class="simulation-controls">
-                <button id="pause-simulation" class="hidden">Pause</button>
-                <button id="resume-simulation" class="hidden">Resume</button>
-                <button id="replay-simulation" class="hidden">Replay</button>
-                <button id="clear-simulation" class="hidden">Clear</button>
+            <div class="control-option">
+                <input type="checkbox" id="toggle-step-mode" name="step-mode" checked>
+                <label for="toggle-step-mode">Enable Step-by-Step Mode</label>
             </div>
             <div class="control-option">
                 <input type="checkbox" id="toggle-raw-view" name="raw-view">
                 <label for="toggle-raw-view">Show Raw Messages</label>
             </div>
-            <section id="explanation">
-                <h3>Explanation</h3>
-                <div id="explanation-text">
-                    Welcome! Click "Start Handshake" to see a secure TLS connection being established.
-                </div>
-            </section>
-            <section id="quiz" class="hidden">
-                <h2>Quiz</h2>
-                <div id="quiz-content">
-                    <p id="quiz-question">Question text will appear here.</p>
-                    <div id="quiz-options">
-                        <!-- Options will be loaded here -->
-                    </div>
-                    <button id="quiz-submit" class="hidden">Submit Answer</button>
-                    <p id="quiz-feedback"></p>
-                    <button id="quiz-next" class="hidden">Next Question</button>
-                    <button id="quiz-restart" class="hidden">Restart Simulation</button> 
-                </div>
-            </section>
+            <button id="start-simulation">Start Handshake</button>
+            <button id="toggle-attack">Inject Attacker</button>
+            <div class="simulation-controls">
+                <button id="pause-simulation" class="hidden">Pause</button>
+                <button id="resume-simulation" class="hidden">Resume</button>
+                <button id="next-step" class="hidden">Next Step</button>
+                <button id="replay-simulation" class="hidden">Replay</button>
+                <button id="clear-simulation" class="hidden">Clear</button>
+            </div>
         </section>
 
         

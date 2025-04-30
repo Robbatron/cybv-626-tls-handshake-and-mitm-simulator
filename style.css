@@ -36,9 +36,10 @@ section {
     position: relative; /* Needed for absolute positioning of lines */
 }
 
-#controls, #explanation, #quiz {
+#controls, #quiz {
     grid-column: 1 / 2;
     grid-row: 1; /* Explicitly set row */
+    align-self: start; /* Prevent stretching to match simulation area height */
     /* Allow items to flow naturally in the column */
 }
 
@@ -57,7 +58,8 @@ section {
 /* --- End Animation ---*/
 
 #explanation {
-    margin-top: 0; /* Remove potential extra margin if controls/explanation were separated */
+    margin-top: 20px; /* Add some margin above the explanation */
+    margin-bottom: 20px; /* Add some margin below the explanation */
 }
 
 #nodes {
@@ -209,6 +211,25 @@ button:active { /* Add active state */
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
+/* Style for disabled buttons */
+button:disabled {
+    /* background-color: #ccc; */ /* Removed grey background */
+    /* color: #666; */ /* Removed text color change */
+    opacity: 0.6; /* Apply frosted effect */
+    cursor: not-allowed;
+    /* Override hover/active effects */
+    transform: none;
+    box-shadow: none;
+}
+
+/* Explicitly override hover effects for disabled buttons */
+button:disabled:hover {
+    transform: none;
+    box-shadow: none;
+    /* Ensure opacity is maintained if needed, though should inherit */
+    opacity: 0.6;
+}
+
 #toggle-attack.active {
     background: #d9534f; /* Red when attacker is active */
 }
@@ -296,32 +317,10 @@ footer {
     display: none;
 }
 
-/* Quiz specific styles */
-#quiz-options label {
-    display: block;
-    margin-bottom: 8px;
-    cursor: pointer;
-}
-#quiz-options input[type="radio"] {
-    margin-right: 8px;
-}
-
-#quiz-feedback {
-    margin-top: 15px;
-    font-weight: bold;
-}
-
-#quiz-feedback.correct {
-    color: #5cb85c; /* Green */
-}
-
-#quiz-feedback.incorrect {
-    color: #d9534f; /* Red */
-}
-
 /* Style for control options like checkboxes */
 .control-option {
     margin-top: 15px;
+    margin-bottom: 15px;
     padding: 5px;
     background-color: #f9f9f9;
     border: 1px solid #eee;
@@ -346,6 +345,20 @@ footer {
 }
 .simulation-controls button:hover {
      background-color: #e0a800;
+}
+
+/* Style for the Next Step button (similar to others initially) */
+#next-step {
+    background-color: #28a745; /* Green color */
+}
+#next-step:hover {
+    background-color: #218838;
+}
+#next-step:disabled {
+    background-color: #95d8a2; /* Lighter green when disabled */
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
 }
 
 /* Style for the Clear button */
@@ -399,11 +412,15 @@ footer {
     right: 15px;
     background: none;
     border: none;
-    font-size: 1.8rem;
+    font-size: 1.5rem; /* Slightly smaller */
     color: #aaa;
     cursor: pointer;
     padding: 0;
     line-height: 1;
+    /* Overrides to prevent stretching */
+    width: auto;
+    display: inline-block;
+    margin: 0;
 }
 
 .modal-close-btn:hover {

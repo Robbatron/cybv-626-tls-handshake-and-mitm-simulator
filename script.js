@@ -12,22 +12,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const messagesDiv = document.getElementById('messages');
     const explanationText = document.getElementById('explanation-text');
     const explanationSection = document.getElementById('explanation'); // Get the parent section
-    const quizSection = document.getElementById('quiz');
-    const quizContent = document.getElementById('quiz-content');
 
     // Line elements
     const lineClientServer = document.getElementById('line-client-server');
     const lineClientAttacker = document.getElementById('line-client-attacker');
     const lineAttackerServer = document.getElementById('line-attacker-server');
     const tooltipElement = document.getElementById('tooltip');
-
-    // Quiz Elements
-    const quizQuestionElement = document.getElementById('quiz-question');
-    const quizOptionsElement = document.getElementById('quiz-options');
-    const quizSubmitButton = document.getElementById('quiz-submit');
-    const quizFeedbackElement = document.getElementById('quiz-feedback');
-    const quizNextButton = document.getElementById('quiz-next');
-    const quizRestartButton = document.getElementById('quiz-restart');
 
     // Simulation Control Elements
     const pauseButton = document.getElementById('pause-simulation');
@@ -37,6 +27,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Raw View Toggle
     const rawViewToggle = document.getElementById('toggle-raw-view');
+
+    // Step-by-Step Mode Elements
+    const stepModeToggle = document.getElementById('toggle-step-mode');
+    const nextStepButton = document.getElementById('next-step');
 
     // Modal Elements
     const certificateModal = document.getElementById('certificate-modal');
@@ -49,8 +43,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let simulationRunning = false;
     let isPaused = false; // Pause state
     let resumeNotifier = null; // For resolving the pause promise
-    let simulationStopped = false; // Flag to check if simulation was stopped by Clear
-    const stepDelay = 1500; // ms delay between steps
+    let isStepByStepMode = false;    // Tracks if step-by-step mode is active.
+    let stepNotifier = null;         // A Promise resolver used for step-by-step progression.
+    let simulationStopped = false;   // Flag to signal an early stop, usually via the 'Clear' button.
+    const stepDelay = 1500;          // Delay in milliseconds between simulation steps for visualization.
 
     // Define Tooltip Content
     const tooltipContent = {
@@ -106,52 +102,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Quiz Data
-    const quizQuestions = [
-        {
-            question: "What is the primary purpose of the Server Certificate message?",
-            options: [
-                "To encrypt the session",
-                "To prove the server's identity",
-                "To choose cipher suites",
-                "To exchange random numbers"
-            ],
-            correctAnswer: 1 // Index of the correct option
-        },
-        {
-            question: "In a MitM attack simulation, who receives the ClientKeyExchange message encrypted with the FAKE certificate's public key?",
-            options: [
-                "The Client",
-                "The real Server",
-                "The Attacker",
-                "Nobody, it fails"
-            ],
-            correctAnswer: 2
-        },
-        {
-            question: "What does the 'ChangeCipherSpec' message signal?",
-            options: [
-                "The handshake is complete",
-                "An error occurred",
-                "Switching to encrypted communication",
-                "A new certificate is being sent"
-            ],
-            correctAnswer: 2
-        },
-        {
-            question: "Why is verifying the server certificate crucial for security?",
-            options: [
-                "Ensures fastest connection speed",
-                "Prevents MitM attacks by confirming server identity",
-                "Selects the strongest encryption algorithm",
-                "Compresses data for faster transfer"
-            ],
-            correctAnswer: 1
-        }
-    ];
-    let currentQuestionIndex = 0;
-    let score = 0;
-
     // Initial Explanation Text (Now for the messages area)
     const initialMessagesText = "Click 'Start Handshake' (and optionally 'Inject Attacker') to Begin Simulation.";
     const initialExplanationText = "Hover over messages during the simulation for details on each step."; // New default for explanation
@@ -176,11 +126,8 @@ document.addEventListener('DOMContentLoaded', () => {
     startButton.addEventListener('click', runSimulation);
     toggleAttackButton.addEventListener('click', toggleAttack);
     window.addEventListener('resize', updateLinePositions); // Recalculate on resize
-    quizSubmitButton.addEventListener('click', checkAnswer);
-    quizNextButton.addEventListener('click', loadNextQuestion);
-    quizRestartButton.addEventListener('click', () => { location.reload(); }); // Simple way to restart
     replayButton.addEventListener('click', () => {
-        runSimulation();
+        runSimulation(); // Starts a new simulation with current settings.
     });
     clearButton.addEventListener('click', () => {
         simulationStopped = true; // Signal simulation loop to stop
@@ -188,7 +135,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     // Modal Listeners
     modalCloseButton.addEventListener('click', hideCertificateModal);
-    modalOverlay.addEventListener('click', hideCertificateModal);
+    modalOverlay.addEventListener('click', hideCertificateModal); // Close modal on overlay click.
     // Click listener for messages (using delegation)
     messagesDiv.addEventListener('click', (event) => {
         // Use closest() to find the clickable message element, even if a child was clicked
@@ -209,16 +156,32 @@ document.addEventListener('DOMContentLoaded', () => {
         isPaused = true;
         pauseButton.classList.add('hidden');
         resumeButton.classList.remove('hidden');
-        clearButton.classList.remove('hidden');
+        clearButton.classList.remove('hidden'); // Show clear when paused
         explanationText.textContent = "Simulation Paused...";
     });
 
     resumeButton.addEventListener('click', () => {
         console.log("Resume button clicked."); // DIAGNOSTIC
         isPaused = false;
-        resumeButton.classList.add('hidden');
-        pauseButton.classList.remove('hidden');
-        clearButton.classList.add('hidden');
+
+        // Check if user enabled step mode while paused
+        if (stepModeToggle.checked) {
+            console.log("Step mode enabled while paused, switching to step mode."); // DIAGNOSTIC
+            isStepByStepMode = true;
+            resumeButton.classList.add('hidden');
+            pauseButton.classList.add('hidden');
+            nextStepButton.classList.remove('hidden');
+            // clearButton.classList.remove('hidden');
+            nextStepButton.disabled = true; // Start disabled, waitForNextStep will enable
+        } else {
+            // Normal resume: Ensure step mode is off and show Pause button
+            isStepByStepMode = false;
+            resumeButton.classList.add('hidden');
+            pauseButton.classList.remove('hidden');
+            nextStepButton.classList.add('hidden');
+        }
+
+        // clearButton.classList.add('hidden'); // Hide clear when running
         explanationText.textContent = "Simulation Resuming...";
         // Signal waiting code to continue
         if (resumeNotifier) {
@@ -227,6 +190,31 @@ document.addEventListener('DOMContentLoaded', () => {
             resumeNotifier = null;
         } else {
             console.log("resumeNotifier was null."); // DIAGNOSTIC
+        }
+    });
+
+    // Next Step Listener
+    nextStepButton.addEventListener('click', () => {
+        console.log("Next Step button clicked."); // DIAGNOSTIC
+
+        // Check current state of the toggle *when button is clicked*
+        if (!stepModeToggle.checked) {
+            console.log("Step mode unchecked, switching to automatic mode."); // DIAGNOSTIC
+            isStepByStepMode = false; // Update the mode
+            nextStepButton.classList.add('hidden');
+            pauseButton.classList.remove('hidden'); // Show pause button for automatic mode
+            // Resume button remains hidden
+        }
+
+        if (stepNotifier) {
+            console.log("Calling stepNotifier()."); // DIAGNOSTIC
+            stepNotifier(); // Resolve the promise waitForNextStep is waiting on
+            stepNotifier = null;
+            // Disable button immediately after click until next step enables it (if still in step mode)
+            // If switching modes, it's hidden anyway.
+            nextStepButton.disabled = true;
+        } else {
+            console.log("stepNotifier was null."); // DIAGNOSTIC
         }
     });
 
@@ -250,29 +238,39 @@ document.addEventListener('DOMContentLoaded', () => {
         // Update lines based on mode
         updateLinePositions(); 
 
-        // Reset simulation if toggled during run?
-        // if (simulationRunning) resetSimulation();
-        quizContent.innerHTML = '';
     }
 
     async function runSimulation() {
         clearSimulation(false); // Clear previous state/visuals before starting
         simulationStopped = false; // Reset stop flag for new run
+        isStepByStepMode = stepModeToggle.checked; // Check mode at the start
+        console.log(`Starting simulation. Step-by-step mode: ${isStepByStepMode}`); // DIAGNOSTIC
 
         simulationRunning = true;
         isPaused = false; // Ensure not paused at start
-        // Button states: Start/Toggle disabled, Pause shown, Replay/Clear disabled/enabled
+        // Button states based on mode
         startButton.disabled = true;
         toggleAttackButton.disabled = true;
-        pauseButton.classList.remove('hidden');
-        resumeButton.classList.add('hidden');
         replayButton.disabled = true; // Disable replay while running
         clearButton.disabled = false;
+        clearButton.classList.remove('hidden'); // Show clear while running
+
+        if (isStepByStepMode) {
+            pauseButton.classList.add('hidden');
+            resumeButton.classList.add('hidden');
+            nextStepButton.classList.remove('hidden');
+            nextStepButton.disabled = true; // Start disabled, enabled by waitForNextStep
+        } else {
+            pauseButton.classList.remove('hidden');
+            resumeButton.classList.add('hidden');
+            nextStepButton.classList.add('hidden');
+        }
 
         explanationText.textContent = "Starting TLS Handshake...";
 
         try {
             const selectedTlsVersion = document.getElementById('tls-version-select').value;
+            // Selects the appropriate handshake simulation based on attack mode.
             if (isAttackMode) {
                 console.log("Attempting to run simulateAttackHandshake...");
                 await simulateAttackHandshake(selectedTlsVersion);
@@ -282,44 +280,45 @@ document.addEventListener('DOMContentLoaded', () => {
                 await simulateSecureHandshake(selectedTlsVersion);
                 console.log("simulateSecureHandshake finished.");
             }
-            console.log("Simulation function finished, attempting to show quiz...");
-            showQuiz(); // Show quiz only on successful completion
-            replayButton.disabled = false; // <-- Show Replay button on success
+            console.log("Simulation function finished.");
+            replayButton.disabled = false; // Enable replay button on success.
             clearButton.disabled = false;
-            clearButton.classList.add('hidden'); // <-- Hide Clear button when simulation ends/errors
+            clearButton.classList.add('hidden'); // Hide Clear button when simulation ends successfully.
+            nextStepButton.classList.add('hidden'); // Hide Next Step when simulation ends
+
         } catch (error) {
             if (error.message !== 'Simulation stopped by user') {
-                // Only log unexpected errors and show the error message for those
+                // Handle unexpected errors during simulation.
                 console.error("Unexpected simulation error during run:", error);
                 explanationText.textContent = "An unexpected error occurred during the simulation.";
             } else {
-                // Log the intentional stop but don't change the explanation text
-                // (it was already set by clearSimulation)
+                // Handle intentional stop via 'Clear' button.
                 console.log("Simulation stopped via Clear button.");
+                 // clearSimulation already handles text/button reset in this case
             }
             // Error state button resets handled in finally
         } finally {
+            // Cleanup and reset UI states regardless of success or failure.
             console.log("Simulation run finished or errored.");
             simulationRunning = false;
             isPaused = false;
-            // Final button states
+            // Final button states (ensure consistency)
             startButton.disabled = false;
             toggleAttackButton.disabled = false;
             pauseButton.classList.add('hidden');
             resumeButton.classList.add('hidden');
-            replayButton.disabled = false; // Show and enable replay
-            replayButton.disabled = false;
-            clearButton.disabled = false; // Ensure enabled
-            clearButton.classList.add('hidden'); // Hide Clear
+            nextStepButton.classList.add('hidden'); // Always hide Next Step at the end
+            replayButton.disabled = false; // Always enable replay at the end
+            clearButton.disabled = false; // Ensure enabled, even if hidden
+            clearButton.classList.add('hidden'); // Always hide Clear at the end
         }
     }
 
+    // Resets the visual elements of the simulation area (messages, explanation, quiz).
     function resetSimulationVisuals() {
         messagesDiv.innerHTML = `<div class="placeholder-message">${initialMessagesText}</div>`; // Set placeholder on reset
         // Reset node styles or positions if needed
         explanationText.textContent = initialExplanationText; // Reset explanation too
-        quizSection.classList.add('hidden');
-        quizContent.innerHTML = '';
     }
 
     // Function to calculate and draw lines between nodes
@@ -355,9 +354,10 @@ document.addEventListener('DOMContentLoaded', () => {
         lineElement.style.transform = `rotate(${angle}deg)`;
     }
 
-    // Helper function to wait if paused
+    // Utility function to pause the simulation if the `isPaused` flag is true (Automatic Mode).
+    // Also checks if the simulation was stopped early.
     async function waitForResume() {
-        console.log("waitForResume called."); // DIAGNOSTIC
+        console.log("waitForResume called (Automatic Mode Pause Check)."); // DIAGNOSTIC
         // Check if stopped first.
         if (simulationStopped) {
             console.log("waitForResume: simulation stopped, throwing error."); // DIAGNOSTIC
@@ -373,65 +373,86 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log("waitForResume: Resumed."); // DIAGNOSTIC
         }
         // Quiz-related UI updates potentially moved here or kept separate.
-        quizFeedbackElement.className = '';
-        quizRestartButton.classList.remove('hidden');
-        // Replay button shown after successful run in runSimulation now
-        // replayButton.classList.remove('hidden'); 
+    }
+
+    // Utility function to pause execution and wait for the Next Step button (Step-by-Step Mode).
+    async function waitForNextStep() {
+        console.log("waitForNextStep called."); // DIAGNOSTIC
+        if (simulationStopped) {
+            console.log("waitForNextStep: simulation stopped, throwing error."); // DIAGNOSTIC
+            throw new Error('Simulation stopped by user');
+        }
+
+        // Do not change the explanation text while waiting
+        // const currentExplanation = explanationText.textContent; // Store current explanation
+        // updateExplanation("Click 'Next Step' to continue..."); // Change text while waiting
+        nextStepButton.disabled = false; // Enable the button
+
+        console.log("waitForNextStep: Waiting for stepNotifier..."); // DIAGNOSTIC
+        await new Promise(resolve => {
+            stepNotifier = resolve;
+        });
+        console.log("waitForNextStep: Resumed by stepNotifier."); // DIAGNOSTIC
+
+        // Explanation text is not changed here.
+        // The actual explanation for the *next* step will be set by the calling function after this await resolves.
+
+        // Next Step button is disabled in its click handler.
     }
 
     async function simulateSecureHandshake(tlsVersion) {
-        console.log(`Simulating secure handshake for ${tlsVersion}...`);
-        updateExplanation(`Starting ${tlsVersion} Secure Handshake...`);
-        await delay(stepDelay / 2);
+        // No initial delay in step-by-step mode
+        if (!isStepByStepMode) {
+             await delay(stepDelay / 2);
+        }
 
         // Version-specific handshake logic.
         switch (tlsVersion) {
             case 'tls1.3':
                 // TLS 1.3 handshake steps (condensed).
                 await addMessage(clientNode, serverNode, 'ClientHello', tlsVersion);
-                updateExplanation('TLS 1.3: Client sends Hello (key share, supported versions, ciphers, sig algs).');
-                console.log("Before await waitForResume (TLS 1.3 - 1)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Client sends Hello (key share, supported versions, ciphers, sig algs).');
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
 
                 // Server processes ClientHello, selects params, generates keys, derives early secrets
                 await addMessage(serverNode, clientNode, 'ServerHello', tlsVersion);
-                updateExplanation('TLS 1.3: Server sends Hello (selected key share, cipher).');
-                console.log("Before await waitForResume (TLS 1.3 - 2)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Server sends Hello (selected key share, cipher).');
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
+
                 await addMessage(serverNode, clientNode, 'EncryptedExtensions', tlsVersion);
-                updateExplanation('TLS 1.3: Server sends Encrypted Extensions (e.g., ALPN).');
-                console.log("Before await waitForResume (TLS 1.3 - 3)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Server sends Encrypted Extensions (e.g., ALPN).');
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
+
                 // Optional: Server requests client certificate here if needed (CertificateRequest)
                 await addMessage(serverNode, clientNode, 'Certificate (TLS 1.3)', tlsVersion);
-                updateExplanation('TLS 1.3: Server sends its Certificate.');
-                console.log("Before await waitForResume (TLS 1.3 - 4)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Server sends its Certificate.');
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
+
                 await addMessage(serverNode, clientNode, 'CertificateVerify (TLS 1.3)', tlsVersion);
-                updateExplanation('TLS 1.3: Server proves ownership of its private key.');
-                console.log("Before await waitForResume (TLS 1.3 - 5)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Server proves ownership of its private key.');
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
+
                 await addMessage(serverNode, clientNode, 'Finished (Encrypted, TLS 1.3)', tlsVersion);
-                updateExplanation('TLS 1.3: Server Finished (verifies handshake). Client derives master secret.');
-                console.log("Before await waitForResume (TLS 1.3 - 6)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Server Finished (verifies handshake). Client derives master secret.');
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
+
 
                 // Client processes Server messages, authenticates server, derives keys
                 // Optional: Client sends Certificate and CertificateVerify if requested
                 await addMessage(clientNode, serverNode, 'Finished (Encrypted, TLS 1.3)', tlsVersion);
-                updateExplanation('TLS 1.3: Client Finished (verifies handshake). Server derives master secret. Handshake complete!');
-                console.log("Before await waitForResume (TLS 1.3 - 7)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Client Finished (verifies handshake). Server derives master secret. Handshake complete!');
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
+
 
                 // Application Data uses application traffic secrets derived from master secret
                 await addMessage(clientNode, serverNode, 'Application Data (Encrypted, TLS 1.3)', tlsVersion);
-                updateExplanation('TLS 1.3: Secure Application Data flowing.');
-                console.log("Before await waitForResume (TLS 1.3 - 8)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Secure Application Data flowing.');
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
+
                 await addMessage(serverNode, clientNode, 'Application Data (Encrypted, TLS 1.3)', tlsVersion);
-                updateExplanation('TLS 1.3: Secure Application Data flowing.');
-                console.log("Before await waitForResume (TLS 1.3 - 9)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Secure Application Data flowing.');
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
+
                 break;
 
             case 'tls1.2':
@@ -439,126 +460,103 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'tls1.0':
                 // TLS 1.0-1.2 handshake steps (example using ECDHE).
                 await addMessage(clientNode, serverNode, 'ClientHello', tlsVersion);
-                updateExplanation(`${tlsVersion}: Client sends Hello (versions, ciphers, extensions like SNI).`);
-                console.log(`Before await waitForResume (${tlsVersion} - 1)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Client sends Hello (versions, ciphers, extensions like SNI).`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
 
                 await addMessage(serverNode, clientNode, 'ServerHello', tlsVersion);
-                updateExplanation(`${tlsVersion}: Server sends Hello (chosen version, cipher, session ID).`);
-                console.log(`Before await waitForResume (${tlsVersion} - 2)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Server sends Hello (chosen version, cipher, session ID).`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
 
                 await addMessage(serverNode, clientNode, 'Certificate', tlsVersion);
-                updateExplanation(`${tlsVersion}: Server sends its Certificate chain.`);
-                console.log(`Before await waitForResume (${tlsVersion} - 3)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Server sends its Certificate chain.`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
 
                 // ServerKeyExchange is needed for DHE/ECDHE cipher suites
                 await addMessage(serverNode, clientNode, 'ServerKeyExchange', tlsVersion);
-                updateExplanation(`${tlsVersion}: Server sends Key Exchange parameters (e.g., EC curve point) signed by its certificate key.`);
-                console.log(`Before await waitForResume (${tlsVersion} - 4)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Server sends Key Exchange parameters (e.g., EC curve point) signed by its certificate key.`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 // Optional: CertificateRequest if server wants client auth
                 await addMessage(serverNode, clientNode, 'ServerHelloDone', tlsVersion);
-                updateExplanation(`${tlsVersion}: Server indicates end of its initial messages.`);
-                console.log(`Before await waitForResume (${tlsVersion} - 5)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Server indicates end of its initial messages.`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
 
                 // Optional: Client sends Certificate if requested
                 await addMessage(clientNode, serverNode, 'ClientKeyExchange', tlsVersion);
-                updateExplanation(`${tlsVersion}: Client sends its Key Exchange parameters (e.g., its EC point). Both sides calculate pre-master secret.`);
-                console.log(`Before await waitForResume (${tlsVersion} - 6)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Client sends its Key Exchange parameters (e.g., its EC point). Both sides calculate pre-master secret.`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 // Both sides calculate master secret from pre-master secret and randoms
                 // Now Client sends encrypted messages
                 await addMessage(clientNode, serverNode, 'ChangeCipherSpec', tlsVersion);
-                updateExplanation(`${tlsVersion}: Client signals switch to encrypted communication using derived keys.`);
-                console.log(`Before await waitForResume (${tlsVersion} - 7)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Client signals switch to encrypted communication using derived keys.`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
 
                 await addMessage(clientNode, serverNode, 'Finished (Encrypted)', tlsVersion);
-                updateExplanation(`${tlsVersion}: Client sends encrypted Finished (hash of handshake) to verify key exchange.`);
-                console.log(`Before await waitForResume (${tlsVersion} - 8)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Client sends encrypted Finished (hash of handshake) to verify key exchange.`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
 
                 // Server calculates master secret and processes client messages
                 await addMessage(serverNode, clientNode, 'ChangeCipherSpec', tlsVersion);
-                updateExplanation(`${tlsVersion}: Server signals switch to encrypted communication.`);
-                console.log(`Before await waitForResume (${tlsVersion} - 9)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Server signals switch to encrypted communication.`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
 
                 await addMessage(serverNode, clientNode, 'Finished (Encrypted)', tlsVersion);
-                updateExplanation(`${tlsVersion}: Server sends encrypted Finished. Handshake complete!`);
-                console.log(`Before await waitForResume (${tlsVersion} - 10)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Server sends encrypted Finished. Handshake complete!`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
 
                 await addMessage(clientNode, serverNode, 'Application Data (Encrypted)', tlsVersion);
-                updateExplanation(`${tlsVersion}: Secure Application Data flowing.`);
-                console.log(`Before await waitForResume (${tlsVersion} - 11)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Secure Application Data flowing.`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(serverNode, clientNode, 'Application Data (Encrypted)', tlsVersion);
-                updateExplanation(`${tlsVersion}: Secure Application Data flowing.`);
-                console.log(`Before await waitForResume (${tlsVersion} - 12)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Secure Application Data flowing.`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 break;
 
             case 'ssl3.0':
                 // SSL 3.0 handshake steps (example using RSA).
                 // ** Note: SSL 3.0 is insecure **
                 await addMessage(clientNode, serverNode, 'ClientHello', tlsVersion);
-                updateExplanation(`SSL 3.0: Client sends Hello (max version SSL 3.0, ciphers like RSA_3DES or RSA_RC4).`);
-                console.log(`Before await waitForResume (SSL 3.0 - 1)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Client sends Hello (max version SSL 3.0, ciphers like RSA_3DES or RSA_RC4).`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
 
                 await addMessage(serverNode, clientNode, 'ServerHello', tlsVersion);
-                updateExplanation(`SSL 3.0: Server sends Hello (chosen version SSL 3.0, cipher like RSA_3DES).`);
-                console.log(`Before await waitForResume (SSL 3.0 - 2)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Server sends Hello (chosen version SSL 3.0, cipher like RSA_3DES).`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
 
                 await addMessage(serverNode, clientNode, 'Certificate', tlsVersion);
-                updateExplanation(`SSL 3.0: Server sends its Certificate (RSA key).`);
-                console.log(`Before await waitForResume (SSL 3.0 - 3)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Server sends its Certificate (RSA key).`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
 
                 // ServerKeyExchange typically NOT used for RSA key exchange in SSL 3.0
                 await addMessage(serverNode, clientNode, 'ServerHelloDone', tlsVersion);
-                updateExplanation(`SSL 3.0: Server indicates end of its initial messages.`);
-                console.log(`Before await waitForResume (SSL 3.0 - 4)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Server indicates end of its initial messages.`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
 
                 await addMessage(clientNode, serverNode, 'ClientKeyExchange', tlsVersion);
-                updateExplanation(`SSL 3.0: Client generates pre-master secret, encrypts it with Server's RSA public key.`);
-                console.log(`Before await waitForResume (SSL 3.0 - 5)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Client generates pre-master secret, encrypts it with Server's RSA public key.`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 // Both sides calculate master secret
                 await addMessage(clientNode, serverNode, 'ChangeCipherSpec', tlsVersion);
-                updateExplanation(`SSL 3.0: Client signals switch to encrypted communication.`);
-                console.log(`Before await waitForResume (SSL 3.0 - 6)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Client signals switch to encrypted communication.`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
 
                 await addMessage(clientNode, serverNode, 'Finished (Encrypted)', tlsVersion);
-                updateExplanation(`SSL 3.0: Client sends encrypted Finished (based on MD5 and SHA-1 hashes).`);
-                console.log(`Before await waitForResume (SSL 3.0 - 7)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Client sends encrypted Finished (based on MD5 and SHA-1 hashes).`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
 
                 await addMessage(serverNode, clientNode, 'ChangeCipherSpec', tlsVersion);
-                updateExplanation(`SSL 3.0: Server signals switch to encrypted communication.`);
-                console.log(`Before await waitForResume (SSL 3.0 - 8)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Server signals switch to encrypted communication.`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
 
                 await addMessage(serverNode, clientNode, 'Finished (Encrypted)', tlsVersion);
-                updateExplanation(`SSL 3.0: Server sends encrypted Finished. Handshake complete! (But insecure!)`);
-                console.log(`Before await waitForResume (SSL 3.0 - 9)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Server sends encrypted Finished. Handshake complete! (But insecure!)`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
 
                 await addMessage(clientNode, serverNode, 'Application Data (Encrypted)', tlsVersion);
-                updateExplanation(`SSL 3.0: Encrypted Application Data (potentially vulnerable - e.g., POODLE if CBC used).`);
-                console.log(`Before await waitForResume (SSL 3.0 - 10)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Encrypted Application Data (potentially vulnerable - e.g., POODLE if CBC used).`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(serverNode, clientNode, 'Application Data (Encrypted)', tlsVersion);
-                updateExplanation(`SSL 3.0: Encrypted Application Data.`);
-                console.log(`Before await waitForResume (SSL 3.0 - 11)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Encrypted Application Data.`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 break;
         }
         updateExplanation(`${tlsVersion} Handshake Complete. Starting Quiz...`); // Final update before quiz.
@@ -892,104 +890,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return rawData;
     }
 
-    // Quiz Functions ------------------------------------------
-    function showQuiz() {
-        console.log("Executing showQuiz function...");
-        currentQuestionIndex = 0;
-        score = 0;
-        loadQuizQuestion(currentQuestionIndex);
-        quizSection.classList.remove('hidden');
-        quizFeedbackElement.textContent = '';
-        quizFeedbackElement.className = ''; // Reset feedback style
-        quizRestartButton.classList.add('hidden');
-    }
-
-    function loadQuizQuestion(index) {
-        console.log(`loadQuizQuestion called with index: ${index}`); // Log entry
-        if (index >= quizQuestions.length) {
-            console.log("Quiz finished, calling showResults.");
-            showResults();
-            return;
-        }
-
-        console.log("Getting question data for index:", index);
-        const questionData = quizQuestions[index];
-        if (!questionData) {
-            console.error("Error: Could not find question data for index", index);
-            return;
-        }
-
-        console.log("Setting question text element:", quizQuestionElement);
-        quizQuestionElement.textContent = questionData.question;
-        console.log("Clearing options element:", quizOptionsElement);
-        quizOptionsElement.innerHTML = ''; // Clear previous options
-
-        console.log("Looping through options:", questionData.options);
-        questionData.options.forEach((option, i) => {
-            console.log(`Creating option ${i}: ${option}`);
-            const label = document.createElement('label');
-            const radio = document.createElement('input');
-            radio.type = 'radio';
-            radio.name = 'quizOption';
-            radio.value = i;
-            radio.id = `option${i}`;
-
-            label.appendChild(radio);
-            label.appendChild(document.createTextNode(option)); // Add text node for the option
-            quizOptionsElement.appendChild(label);
-        });
-
-        console.log("Showing Submit button, hiding Next button.");
-        quizSubmitButton.classList.remove('hidden');
-        quizNextButton.classList.add('hidden');
-        quizFeedbackElement.textContent = '';
-        quizFeedbackElement.className = '';
-        console.log("loadQuizQuestion finished for index:", index);
-    }
-
-    function checkAnswer() {
-        const selectedOption = quizOptionsElement.querySelector('input[name="quizOption"]:checked');
-        if (!selectedOption) {
-            quizFeedbackElement.textContent = "Please select an answer.";
-            quizFeedbackElement.className = 'incorrect';
-            return;
-        }
-
-        const answerIndex = parseInt(selectedOption.value);
-        const questionData = quizQuestions[currentQuestionIndex];
-
-        if (answerIndex === questionData.correctAnswer) {
-            quizFeedbackElement.textContent = "Correct!";
-            quizFeedbackElement.className = 'correct';
-            score++;
-        } else {
-            quizFeedbackElement.textContent = `Incorrect. The correct answer was: ${questionData.options[questionData.correctAnswer]}`;
-            quizFeedbackElement.className = 'incorrect';
-        }
-
-        // Disable options after answering
-        quizOptionsElement.querySelectorAll('input[name="quizOption"]').forEach(input => input.disabled = true);
-
-        quizSubmitButton.classList.add('hidden');
-        quizNextButton.classList.remove('hidden');
-    }
-
-    function loadNextQuestion() {
-        currentQuestionIndex++;
-        loadQuizQuestion(currentQuestionIndex);
-        // Re-enable options for the new question (handled inside loadQuizQuestion by clearing/recreating)
-    }
-
-    function showResults() {
-        quizQuestionElement.textContent = `Quiz Complete!`;
-        quizOptionsElement.innerHTML = `<p>Your score: ${score} out of ${quizQuestions.length}</p>`;
-        quizSubmitButton.classList.add('hidden');
-        quizNextButton.classList.add('hidden');
-        quizFeedbackElement.textContent = '';
-        quizFeedbackElement.className = '';
-        quizRestartButton.classList.remove('hidden');
-    }
-
     // End Quiz Functions --------------------------------------
 
     // Function to clear simulation state and visuals
@@ -999,21 +899,29 @@ document.addEventListener('DOMContentLoaded', () => {
         simulationStopped = true; // Ensure any running loops stop
         isPaused = false;
         if (resumeNotifier) { // Ensure any pending pause is resolved
+             console.log("clearSimulation: Resolving pending resumeNotifier."); // DIAGNOSTIC
              resumeNotifier();
              resumeNotifier = null;
         }
+        if (stepNotifier) { // Ensure any pending step is resolved
+             console.log("clearSimulation: Resolving pending stepNotifier."); // DIAGNOSTIC
+             stepNotifier();
+             stepNotifier = null;
+        }
         resetSimulationVisuals(); // Clear messages, etc.
-        // Reset explanation text via helper function
-        updateExplanation(initialExplanationText);
+        // Reset explanation text via helper function only if requested
+        if (resetExplanation) {
+            updateExplanation(initialExplanationText);
+        }
         // Reset button states
         startButton.disabled = false;
         toggleAttackButton.disabled = false;
         pauseButton.classList.add('hidden');
         resumeButton.classList.add('hidden');
-        replayButton.disabled = true; // Disable replay when simulation ends
-        clearButton.disabled = false;
-        clearButton.classList.add('hidden'); // <-- Hide Clear button when cleared
-        quizSection.classList.add('hidden'); // Hide quiz
+        nextStepButton.classList.add('hidden');
+        replayButton.disabled = true; // Disable replay when simulation is cleared/stopped
+        clearButton.disabled = false; // Should be enabled briefly, but then hidden
+        clearButton.classList.add('hidden'); // Hide Clear button when cleared
     }
 
     // Modal Functions
@@ -1052,9 +960,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function simulateAttackHandshake(tlsVersion) {
-        console.log(`Simulating MitM attack for ${tlsVersion}...`);
-        updateExplanation(`Starting ${tlsVersion} MitM Attack Simulation...`);
-        await delay(stepDelay / 2);
+         // No initial delay in step-by-step mode
+        if (!isStepByStepMode) {
+             await delay(stepDelay / 2);
+        }
 
         // Version-specific MitM handshake logic.
         switch (tlsVersion) {
@@ -1062,81 +971,81 @@ document.addEventListener('DOMContentLoaded', () => {
                  // MitM flow for TLS 1.3 (simplified - real MitM is harder).
                 // Attacker establishes separate sessions with client and server.
                 await addMessage(clientNode, attackerNode, 'ClientHello (Intercepted)', tlsVersion);
-                updateExplanation('TLS 1.3 MitM: Attacker intercepts ClientHello.');
-                console.log("Before await waitForResume (MitM TLS 1.3 - 1)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Attacker intercepts ClientHello.');
+                console.log("Before wait block (MitM TLS 1.3 - 1)"); // DIAGNOSTIC
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(attackerNode, serverNode, 'ClientHello', tlsVersion);
-                updateExplanation('TLS 1.3 MitM: Attacker forwards ClientHello to Server.');
-                console.log("Before await waitForResume (MitM TLS 1.3 - 2)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Attacker forwards ClientHello to Server.');
+                console.log("Before wait block (MitM TLS 1.3 - 2)"); // DIAGNOSTIC
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(serverNode, attackerNode, 'ServerHello', tlsVersion);
-                updateExplanation('TLS 1.3 MitM: Attacker intercepts ServerHello.');
-                console.log("Before await waitForResume (MitM TLS 1.3 - 3)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Attacker intercepts ServerHello.');
+                console.log("Before wait block (MitM TLS 1.3 - 3)"); // DIAGNOSTIC
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(serverNode, attackerNode, 'EncryptedExtensions', tlsVersion);
-                updateExplanation('TLS 1.3 MitM: Attacker intercepts EncryptedExtensions.');
-                console.log("Before await waitForResume (MitM TLS 1.3 - 4)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Attacker intercepts EncryptedExtensions.');
+                console.log("Before wait block (MitM TLS 1.3 - 4)"); // DIAGNOSTIC
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(serverNode, attackerNode, 'Certificate (TLS 1.3)', tlsVersion);
-                updateExplanation('TLS 1.3 MitM: Attacker intercepts Server Certificate.');
-                console.log("Before await waitForResume (MitM TLS 1.3 - 5)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Attacker intercepts Server Certificate.');
+                console.log("Before wait block (MitM TLS 1.3 - 5)"); // DIAGNOSTIC
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(serverNode, attackerNode, 'CertificateVerify (TLS 1.3)', tlsVersion);
-                updateExplanation('TLS 1.3 MitM: Attacker intercepts Server CertificateVerify.');
-                console.log("Before await waitForResume (MitM TLS 1.3 - 6)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Attacker intercepts Server CertificateVerify.');
+                console.log("Before wait block (MitM TLS 1.3 - 6)"); // DIAGNOSTIC
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(serverNode, attackerNode, 'Finished (Encrypted, TLS 1.3)', tlsVersion);
-                updateExplanation('TLS 1.3 MitM: Attacker intercepts Server Finished.');
-                console.log("Before await waitForResume (MitM TLS 1.3 - 7)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Attacker intercepts Server Finished.');
+                console.log("Before wait block (MitM TLS 1.3 - 7)"); // DIAGNOSTIC
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 // Attacker now talks to client (using fake cert etc)
                 await addMessage(attackerNode, clientNode, 'ServerHello', tlsVersion);
-                updateExplanation('TLS 1.3 MitM: Attacker sends own ServerHello to Client.');
-                console.log("Before await waitForResume (MitM TLS 1.3 - 8)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Attacker sends own ServerHello to Client.');
+                console.log("Before wait block (MitM TLS 1.3 - 8)"); // DIAGNOSTIC
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(attackerNode, clientNode, 'EncryptedExtensions', tlsVersion);
-                updateExplanation('TLS 1.3 MitM: Attacker sends own EncryptedExtensions.');
-                console.log("Before await waitForResume (MitM TLS 1.3 - 9)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Attacker sends own EncryptedExtensions.');
+                console.log("Before wait block (MitM TLS 1.3 - 9)"); // DIAGNOSTIC
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(attackerNode, clientNode, 'Certificate (Attacker FAKE Cert)', tlsVersion);
-                updateExplanation('TLS 1.3 MitM: Attacker sends FAKE Certificate to Client.');
-                console.log("Before await waitForResume (MitM TLS 1.3 - 10)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Attacker sends FAKE Certificate to Client.');
+                console.log("Before wait block (MitM TLS 1.3 - 10)"); // DIAGNOSTIC
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(attackerNode, clientNode, 'CertificateVerify (TLS 1.3)', tlsVersion);
-                updateExplanation('TLS 1.3 MitM: Attacker sends own CertificateVerify.');
-                console.log("Before await waitForResume (MitM TLS 1.3 - 11)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Attacker sends own CertificateVerify.');
+                console.log("Before wait block (MitM TLS 1.3 - 11)"); // DIAGNOSTIC
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(attackerNode, clientNode, 'Finished (Encrypted, TLS 1.3)', tlsVersion);
-                updateExplanation('TLS 1.3 MitM: Attacker sends own Finished to Client.');
-                console.log("Before await waitForResume (MitM TLS 1.3 - 12)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Attacker sends own Finished to Client.');
+                console.log("Before wait block (MitM TLS 1.3 - 12)"); // DIAGNOSTIC
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 // Client finishes its side
                 await addMessage(clientNode, attackerNode, 'Finished (Encrypted, TLS 1.3)', tlsVersion);
-                updateExplanation('TLS 1.3 MitM: Attacker intercepts Client Finished.');
-                console.log("Before await waitForResume (MitM TLS 1.3 - 13)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Attacker intercepts Client Finished.');
+                console.log("Before wait block (MitM TLS 1.3 - 13)"); // DIAGNOSTIC
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 // Attacker forwards to server
                 await addMessage(attackerNode, serverNode, 'Finished (Encrypted, TLS 1.3)', tlsVersion);
-                updateExplanation('TLS 1.3 MitM: Attacker forwards Finished to Server. Handshake complete (MitM!).');
-                console.log("Before await waitForResume (MitM TLS 1.3 - 14)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Attacker forwards Finished to Server. Handshake complete (MitM!).');
+                console.log("Before wait block (MitM TLS 1.3 - 14)"); // DIAGNOSTIC
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 // Application Data Flow (Intercepted)
                 await addMessage(clientNode, attackerNode, 'Application Data (Encrypted, Intercepted)', tlsVersion);
-                updateExplanation('TLS 1.3 MitM: Attacker intercepts encrypted data from Client.');
-                console.log("Before await waitForResume (MitM TLS 1.3 - 15)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Attacker intercepts encrypted data from Client.');
+                console.log("Before wait block (MitM TLS 1.3 - 15)"); // DIAGNOSTIC
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(attackerNode, serverNode, 'Application Data (Re-encrypted)', tlsVersion);
-                updateExplanation('TLS 1.3 MitM: Attacker re-encrypts and forwards data to Server.');
-                console.log("Before await waitForResume (MitM TLS 1.3 - 16)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Attacker re-encrypts and forwards data to Server.');
+                console.log("Before wait block (MitM TLS 1.3 - 16)"); // DIAGNOSTIC
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(serverNode, attackerNode, 'Application Data (Encrypted, Intercepted)', tlsVersion);
-                updateExplanation('TLS 1.3 MitM: Attacker intercepts encrypted data from Server.');
-                console.log("Before await waitForResume (MitM TLS 1.3 - 17)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Attacker intercepts encrypted data from Server.');
+                console.log("Before wait block (MitM TLS 1.3 - 17)"); // DIAGNOSTIC
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(attackerNode, clientNode, 'Application Data (Re-encrypted)', tlsVersion);
-                updateExplanation('TLS 1.3 MitM: Attacker re-encrypts and forwards data to Client.');
-                console.log("Before await waitForResume (MitM TLS 1.3 - 18)"); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation('Attacker re-encrypts and forwards data to Client.');
+                console.log("Before wait block (MitM TLS 1.3 - 18)"); // DIAGNOSTIC
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 break;
 
             case 'tls1.2':
@@ -1144,207 +1053,182 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'tls1.0':
                  // MitM flow for TLS 1.0-1.2 (example assuming ECDHE).
                 await addMessage(clientNode, attackerNode, 'ClientHello (Intercepted)', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker intercepts ClientHello.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 1)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Attacker intercepts ClientHello.`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(attackerNode, serverNode, 'ClientHello', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker forwards ClientHello to Server.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 2)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Attacker forwards ClientHello to Server.`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(serverNode, attackerNode, 'ServerHello', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker intercepts ServerHello.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 3)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Attacker intercepts ServerHello.`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(serverNode, attackerNode, 'Certificate (Server REAL Cert)', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker intercepts REAL Server Certificate.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 4)`); // DIAGNOSTIC
-                await waitForResume(); if (simulationStopped) return;
+                updateExplanation(`Attacker intercepts REAL Server Certificate.`);
+                if (isStepByStepMode) { await waitForNextStep(); } else { await delay(stepDelay); await waitForResume(); } if (simulationStopped) return;
                 await addMessage(serverNode, attackerNode, 'ServerKeyExchange', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker intercepts ServerKeyExchange.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 5)`); // DIAGNOSTIC
+                updateExplanation(`Attacker intercepts ServerKeyExchange.`);
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(serverNode, attackerNode, 'ServerHelloDone', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker intercepts ServerHelloDone.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 6)`); // DIAGNOSTIC
+                updateExplanation(`Attacker intercepts ServerHelloDone.`);
                 await waitForResume(); if (simulationStopped) return;
                 // Attacker talks to client
                 await addMessage(attackerNode, clientNode, 'ServerHello', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker sends own ServerHello to Client.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 7)`); // DIAGNOSTIC
+                updateExplanation(`Attacker sends own ServerHello to Client.`);
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(attackerNode, clientNode, 'Certificate (Attacker FAKE Cert)', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker sends FAKE Certificate to Client.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 8)`); // DIAGNOSTIC
+                updateExplanation(`Attacker sends FAKE Certificate to Client.`);
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(attackerNode, clientNode, 'ServerKeyExchange', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker performs own KeyExchange with Client.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 9)`); // DIAGNOSTIC
+                updateExplanation(`Attacker performs own KeyExchange with Client.`);
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(attackerNode, clientNode, 'ServerHelloDone', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker sends own ServerHelloDone.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 10)`); // DIAGNOSTIC
+                updateExplanation(`Attacker sends own ServerHelloDone.`);
                 await waitForResume(); if (simulationStopped) return;
                 // Client sends its part
                 await addMessage(clientNode, attackerNode, 'ClientKeyExchange', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker intercepts ClientKeyExchange.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 11)`); // DIAGNOSTIC
+                updateExplanation(`Attacker intercepts ClientKeyExchange.`);
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(clientNode, attackerNode, 'ChangeCipherSpec', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker intercepts Client ChangeCipherSpec.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 12)`); // DIAGNOSTIC
+                updateExplanation(`Attacker intercepts Client ChangeCipherSpec.`);
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(clientNode, attackerNode, 'Finished (Encrypted)', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker intercepts Client Finished.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 13)`); // DIAGNOSTIC
+                updateExplanation(`Attacker intercepts Client Finished.`);
                 await waitForResume(); if (simulationStopped) return;
                 // Attacker forwards (potentially modified) to server
                 await addMessage(attackerNode, serverNode, 'ClientKeyExchange', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker forwards ClientKeyExchange to Server.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 14)`); // DIAGNOSTIC
+                updateExplanation(`Attacker forwards ClientKeyExchange to Server.`);
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(attackerNode, serverNode, 'ChangeCipherSpec', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker sends ChangeCipherSpec to Server.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 15)`); // DIAGNOSTIC
+                updateExplanation(`Attacker sends ChangeCipherSpec to Server.`);
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(attackerNode, serverNode, 'Finished (Encrypted)', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker sends Finished to Server.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 16)`); // DIAGNOSTIC
+                updateExplanation(`Attacker sends Finished to Server.`);
                 await waitForResume(); if (simulationStopped) return;
                 // Server sends its final part
                 await addMessage(serverNode, attackerNode, 'ChangeCipherSpec', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker intercepts Server ChangeCipherSpec.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 17)`); // DIAGNOSTIC
+                updateExplanation(`Attacker intercepts Server ChangeCipherSpec.`);
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(serverNode, attackerNode, 'Finished (Encrypted)', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker intercepts Server Finished.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 18)`); // DIAGNOSTIC
+                updateExplanation(`Attacker intercepts Server Finished.`);
                 await waitForResume(); if (simulationStopped) return;
                 // Attacker sends final part to client
                 await addMessage(attackerNode, clientNode, 'ChangeCipherSpec', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker sends ChangeCipherSpec to Client.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 19)`); // DIAGNOSTIC
+                updateExplanation(`Attacker sends ChangeCipherSpec to Client.`);
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(attackerNode, clientNode, 'Finished (Encrypted)', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker sends Finished to Client. Handshake complete (MitM!).`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 20)`); // DIAGNOSTIC
+                updateExplanation(`Attacker sends Finished to Client. Handshake complete (MitM!).`);
                 await waitForResume(); if (simulationStopped) return;
                 // Application Data Flow
                 await addMessage(clientNode, attackerNode, 'Application Data (Encrypted, Intercepted)', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker intercepts encrypted data from Client.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 21)`); // DIAGNOSTIC
+                updateExplanation(`Attacker intercepts encrypted data from Client.`);
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(attackerNode, serverNode, 'Application Data (Re-encrypted)', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker re-encrypts and forwards data to Server.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 22)`); // DIAGNOSTIC
+                updateExplanation(`Attacker re-encrypts and forwards data to Server.`);
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(serverNode, attackerNode, 'Application Data (Encrypted, Intercepted)', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker intercepts encrypted data from Server.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 23)`); // DIAGNOSTIC
+                updateExplanation(`Attacker intercepts encrypted data from Server.`);
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(attackerNode, clientNode, 'Application Data (Re-encrypted)', tlsVersion);
-                updateExplanation(`${tlsVersion} MitM: Attacker re-encrypts and forwards data to Client.`);
-                console.log(`Before await waitForResume (MitM ${tlsVersion} - 24)`); // DIAGNOSTIC
+                updateExplanation(`Attacker re-encrypts and forwards data to Client.`);
                 await waitForResume(); if (simulationStopped) return;
                 break;
 
             case 'ssl3.0':
                  // MitM flow for SSL 3.0 (example using RSA).
                 await addMessage(clientNode, attackerNode, 'ClientHello (Intercepted)', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker intercepts ClientHello.`);
+                updateExplanation(`Attacker intercepts ClientHello.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 1)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(attackerNode, serverNode, 'ClientHello', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker forwards ClientHello.`);
+                updateExplanation(`Attacker forwards ClientHello.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 2)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(serverNode, attackerNode, 'ServerHello', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker intercepts ServerHello.`);
+                updateExplanation(`Attacker intercepts ServerHello.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 3)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(serverNode, attackerNode, 'Certificate (Server REAL Cert)', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker intercepts REAL Server Certificate.`);
+                updateExplanation(`Attacker intercepts REAL Server Certificate.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 4)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(serverNode, attackerNode, 'ServerHelloDone', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker intercepts ServerHelloDone.`);
+                updateExplanation(`Attacker intercepts ServerHelloDone.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 5)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 // Attacker to Client
                 await addMessage(attackerNode, clientNode, 'ServerHello', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker sends own ServerHello to Client.`);
+                updateExplanation(`Attacker sends own ServerHello to Client.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 6)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(attackerNode, clientNode, 'Certificate (Attacker FAKE Cert)', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker sends FAKE Certificate to Client.`);
+                updateExplanation(`Attacker sends FAKE Certificate to Client.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 7)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(attackerNode, clientNode, 'ServerHelloDone', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker sends own ServerHelloDone.`);
+                updateExplanation(`Attacker sends own ServerHelloDone.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 8)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 // Client -> Attacker
                 await addMessage(clientNode, attackerNode, 'ClientKeyExchange (Encrypted with FAKE key)', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker intercepts ClientKeyExchange (can decrypt!).`);
+                updateExplanation(`Attacker intercepts ClientKeyExchange (can decrypt!).`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 9)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(clientNode, attackerNode, 'ChangeCipherSpec', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker intercepts Client ChangeCipherSpec.`);
+                updateExplanation(`Attacker intercepts Client ChangeCipherSpec.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 10)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(clientNode, attackerNode, 'Finished (Encrypted)', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker intercepts Client Finished.`);
+                updateExplanation(`Attacker intercepts Client Finished.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 11)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 // Attacker -> Server
                 await addMessage(attackerNode, serverNode, 'ClientKeyExchange (Encrypted with REAL key)', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker re-encrypts/sends KeyExchange to Server.`);
+                updateExplanation(`Attacker re-encrypts/sends KeyExchange to Server.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 12)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(attackerNode, serverNode, 'ChangeCipherSpec', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker sends ChangeCipherSpec to Server.`);
+                updateExplanation(`Attacker sends ChangeCipherSpec to Server.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 13)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(attackerNode, serverNode, 'Finished (Encrypted)', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker sends Finished to Server.`);
+                updateExplanation(`Attacker sends Finished to Server.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 14)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 // Server -> Attacker
                 await addMessage(serverNode, attackerNode, 'ChangeCipherSpec', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker intercepts Server ChangeCipherSpec.`);
+                updateExplanation(`Attacker intercepts Server ChangeCipherSpec.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 15)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(serverNode, attackerNode, 'Finished (Encrypted)', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker intercepts Server Finished.`);
+                updateExplanation(`Attacker intercepts Server Finished.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 16)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 // Attacker -> Client
                 await addMessage(attackerNode, clientNode, 'ChangeCipherSpec', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker sends ChangeCipherSpec to Client.`);
+                updateExplanation(`Attacker sends ChangeCipherSpec to Client.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 17)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(attackerNode, clientNode, 'Finished (Encrypted)', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker sends Finished to Client. Handshake complete (MitM!).`);
+                updateExplanation(`Attacker sends Finished to Client. Handshake complete (MitM!).`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 18)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                  // Application Data Flow
                 await addMessage(clientNode, attackerNode, 'Application Data (Encrypted, Intercepted)', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker intercepts encrypted data from Client.`);
+                updateExplanation(`Attacker intercepts encrypted data from Client.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 19)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(attackerNode, serverNode, 'Application Data (Re-encrypted)', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker re-encrypts data to Server.`);
+                updateExplanation(`Attacker re-encrypts data to Server.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 20)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(serverNode, attackerNode, 'Application Data (Encrypted, Intercepted)', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker intercepts encrypted data from Server.`);
+                updateExplanation(`Attacker intercepts encrypted data from Server.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 21)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 await addMessage(attackerNode, clientNode, 'Application Data (Re-encrypted)', tlsVersion);
-                updateExplanation(`SSL 3.0 MitM: Attacker re-encrypts data to Client.`);
+                updateExplanation(`Attacker re-encrypts data to Client.`);
                 console.log(`Before await waitForResume (MitM SSL 3.0 - 22)`); // DIAGNOSTIC
                 await waitForResume(); if (simulationStopped) return;
                 break;
         }
-        updateExplanation(`${tlsVersion} MitM Attack Complete. Starting Quiz...`); // Final update before quiz.
     }
 });
