@@ -8,7 +8,7 @@ body {
 }
 
 header {
-    background: #333;
+    background: linear-gradient(to bottom, #4a4a4a, #333);
     color: #fff;
     padding: 1rem 0;
     text-align: center;
@@ -71,8 +71,15 @@ section {
 .node {
     background: #5cb85c;
     color: white;
-    padding: 15px 25px;
-    border-radius: 50%;
+    border-radius: 15px; /* Less rounded, more like a tag */
+    width: 90px;  /* Make wider */
+    height: auto; /* Auto height based on content */
+    padding: 10px 5px; /* Add some padding */
+    display: flex;
+    flex-direction: column; /* Stack icon and label */
+    justify-content: center;
+    align-items: center;
+    font-size: 1.8rem; /* Icon size */
     text-align: center;
     box-shadow: 0 2px 5px rgba(0,0,0,0.2);
     position: relative; /* Needed for z-index stacking context */
@@ -147,18 +154,29 @@ section {
 /* Styles for the animated packet */
 .packet {
     position: absolute;
-    width: 20px;
-    height: 15px;
-    background-color: #ffcc00; /* Yellow packet */
-    border: 1px solid #cc9900;
-    border-radius: 3px;
+    width: 25px; /* Slightly wider */
+    height: 18px;
+    background-color: #fff8dc; /* Light creamy yellow */
+    border: 1px solid #ddd;
+    border-radius: 2px; /* Sharper edges */
     z-index: 20; /* Packets above nodes and lines */
     transition: left 1s ease-in-out, top 1s ease-in-out; /* Animation timing */
-    font-size: 0.7em;
+    font-size: 0.8em; /* Adjust if using text */
     text-align: center;
-    line-height: 15px;
+    line-height: 18px;
     overflow: hidden;
+    box-shadow: 1px 1px 3px rgba(0,0,0,0.1);
+    /* Add a flap effect */
+    /* border-top: 3px solid #e0e0e0; */ 
 }
+
+/* Optional: add text/icon inside packet */
+/* .packet::before {
+    content: "\f0e0"; // Font Awesome envelope icon
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    color: #aaa;
+} */
 
 button {
     display: block;
@@ -171,10 +189,19 @@ button {
     border-radius: 3px;
     cursor: pointer;
     font-size: 1rem;
+    transition: background-color 0.2s ease-in-out, transform 0.1s ease; /* Smooth transition */
 }
 
 button:hover {
     background: #286090;
+    /* Slightly lift button on hover */
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+button:active { /* Add active state */
+    transform: translateY(0px); /* Press down */
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 #toggle-attack.active {
@@ -386,4 +413,12 @@ footer {
 #modal-body strong {
     display: inline-block;
     min-width: 100px;
+}
+
+/* Style for the node labels */
+.node-label {
+    font-size: 0.75rem; /* Smaller text size */
+    margin-top: 5px; /* Space between icon and label */
+    font-weight: bold;
+    line-height: 1;
 } 
