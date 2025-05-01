@@ -313,6 +313,13 @@ button:disabled:hover {
     /* Default hidden, positioning set by JS */
 }
 
+/* Style for encrypted connection lines */
+.connection-line.encrypted-link {
+    border-style: dashed;
+    /* background-color: #28a745; /* Optional: Change color to green */
+    /* height: 5px; */ /* Optional: Make thicker */
+}
+
 /* Tooltip Styling */
 #tooltip {
     position: absolute; /* Positioned relative to the body */
@@ -480,4 +487,20 @@ button:disabled:hover {
     border-top: 1px dashed #aaa; /* Dashed separator line */
     color: #444; /* Slightly darker/different color for notes text */
     font-style: italic;
-} 
+}
+
+/* Style for the feedback form section */
+#feedback-section {
+    grid-column: 1 / -1; /* Span both columns */
+    margin-top: 20px;
+}
+
+#feedback-section iframe {
+    width: 100%; /* Make iframe responsive */
+    max-width: 640px; /* Keep max width from embed */
+    display: block; /* Center iframe if max-width applies */
+    margin: 0 auto; /* Center iframe */
+    border: 1px solid #ccc; /* Optional border */
+}
+
+/* Quiz Styles - REMOVED */ 

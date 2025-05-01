@@ -287,30 +287,25 @@ document.addEventListener('DOMContentLoaded', () => {
             nextStepButton.classList.add('hidden'); // Hide Next Step when simulation ends
 
         } catch (error) {
-            if (error.message !== 'Simulation stopped by user') {
-                // Handle unexpected errors during simulation.
-                console.error("Unexpected simulation error during run:", error);
-                explanationText.textContent = "An unexpected error occurred during the simulation.";
-            } else {
-                // Handle intentional stop via 'Clear' button.
-                console.log("Simulation stopped via Clear button.");
-                 // clearSimulation already handles text/button reset in this case
-            }
-            // Error state button resets handled in finally
+            console.error('Simulation error:', error);
+            updateExplanation(`Simulation failed: ${error.message}`)
         } finally {
-            // Cleanup and reset UI states regardless of success or failure.
-            console.log("Simulation run finished or errored.");
             simulationRunning = false;
-            isPaused = false;
-            // Final button states (ensure consistency)
+            // Reset button states after simulation ends (or fails)
             startButton.disabled = false;
             toggleAttackButton.disabled = false;
             pauseButton.classList.add('hidden');
             resumeButton.classList.add('hidden');
-            nextStepButton.classList.add('hidden'); // Always hide Next Step at the end
-            replayButton.disabled = false; // Always enable replay at the end
-            clearButton.disabled = false; // Ensure enabled, even if hidden
-            clearButton.classList.add('hidden'); // Always hide Clear at the end
+            nextStepButton.classList.add('hidden');
+            replayButton.disabled = false; // Enable replay
+            clearButton.disabled = false; // Enable clear
+            clearButton.classList.remove('hidden'); // Show clear
+        }
+
+        // Show feedback form if simulation was not stopped early
+        if (!simulationStopped) {
+            const feedbackSection = document.getElementById('feedback-section');
+            feedbackSection.classList.remove('hidden');
         }
     }
 
@@ -960,6 +955,9 @@ document.addEventListener('DOMContentLoaded', () => {
         replayButton.disabled = true; // Disable replay when simulation is cleared/stopped
         clearButton.disabled = false; // Should be enabled briefly, but then hidden
         clearButton.classList.add('hidden'); // Hide Clear button when cleared
+        // Clear Previous feedback form if shown
+        const feedbackSection = document.getElementById('feedback-section');
+        feedbackSection.classList.add('hidden');
     }
 
     // Modal Functions
@@ -1009,6 +1007,14 @@ document.addEventListener('DOMContentLoaded', () => {
         // Force reflow/repaint before adding class again - setTimeout is a common way
         void explanationSection.offsetWidth; // Trigger reflow (alternative to setTimeout)
         explanationSection.classList.add('step-highlight');
+    }
+
+    // Function to visually indicate encrypted links (primarily for MitM)
+    function setEncryptionState(clientLinkEncrypted, serverLinkEncrypted) {
+        console.log(`Setting encryption state: ClientLink=${clientLinkEncrypted}, ServerLink=${serverLinkEncrypted}`); // DIAGNOSTIC
+        lineClientAttacker.classList.toggle('encrypted-link', clientLinkEncrypted);
+        lineAttackerServer.classList.toggle('encrypted-link', serverLinkEncrypted);
+        // Note: This doesn't handle the secure case (client<->server) yet.
     }
 
     async function simulateAttackHandshake(tlsVersion) {
