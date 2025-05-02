@@ -301,12 +301,6 @@ document.addEventListener('DOMContentLoaded', () => {
             clearButton.disabled = false; // Enable clear
             clearButton.classList.remove('hidden'); // Show clear
         }
-
-        // Show feedback form if simulation was not stopped early
-        if (!simulationStopped) {
-            const feedbackSection = document.getElementById('feedback-section');
-            feedbackSection.classList.remove('hidden');
-        }
     }
 
     // Resets the visual elements of the simulation area (messages, explanation, quiz).
@@ -955,9 +949,6 @@ document.addEventListener('DOMContentLoaded', () => {
         replayButton.disabled = true; // Disable replay when simulation is cleared/stopped
         clearButton.disabled = false; // Should be enabled briefly, but then hidden
         clearButton.classList.add('hidden'); // Hide Clear button when cleared
-        // Clear Previous feedback form if shown
-        const feedbackSection = document.getElementById('feedback-section');
-        feedbackSection.classList.add('hidden');
     }
 
     // Modal Functions
