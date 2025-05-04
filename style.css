@@ -271,8 +271,20 @@ button:disabled:hover {
         grid-template-columns: 1fr; /* Stack columns on smaller screens */
     }
 
-    #simulation-area, #controls, #explanation, #quiz {
-        grid-column: 1 / -1; /* Take full width */
+    #simulation-area,
+    #controls {
+        grid-column: 1 / 2; /* Ensure they occupy the full single column width */
+        /* grid-row will adjust automatically - Explicitly set below */
+    }
+
+    #simulation-area {
+        grid-row: 2; /* Explicitly place in second row */
+        /* Keep its position: relative from default styles */
+    }
+
+    #controls {
+        grid-row: 1; /* Explicitly place in first row */
+        position: relative; /* Give it its own stacking context */
     }
 
     #nodes {
@@ -282,6 +294,10 @@ button:disabled:hover {
 
     .node {
         margin-bottom: 15px;
+    }
+
+    h1 {
+        font-size: 1.5rem; /* Adjust heading size */
     }
 }
 
